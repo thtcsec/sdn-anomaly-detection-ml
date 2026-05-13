@@ -1,0 +1,9 @@
+ryu
+xgboost
+pandas
+numpy
+scikit-learn
+matplotlib
+seaborn
+tensorflow
+jupyter

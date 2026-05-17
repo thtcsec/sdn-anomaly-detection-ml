@@ -1,9 +1,21 @@
-ryu
+# SDN Controller
+os-ken
+
+# Machine Learning
 xgboost
+scikit-learn
+joblib
+
+# Deep Learning (Autoencoder)
+tensorflow
+
+# Data Processing
 pandas
 numpy
-scikit-learn
+
+# Visualization
 matplotlib
 seaborn
-tensorflow
+
+# Development Tools
 jupyter

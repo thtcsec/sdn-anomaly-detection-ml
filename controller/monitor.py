@@ -9,6 +9,8 @@ import os
 import csv
 import time
 from datetime import datetime
+import pandas as pd
+import joblib
 
 from os_ken.base import app_manager
 from os_ken.controller import ofp_event
@@ -17,9 +19,20 @@ from os_ken.ofproto import ofproto_v1_3
 from os_ken.lib.packet import packet, ethernet, ether_types, ipv4, tcp, udp, icmp
 from os_ken.lib import hub
 
+# Helper to read dynamic label
+def get_current_label():
+    label_file = os.path.join(DATASET_DIR, 'current_label.txt')
+    try:
+        with open(label_file, 'r') as f:
+            return f.read().strip()
+    except:
+        return 'normal'
 
-# Đường dẫn lưu dataset
-DATASET_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'dataset')
+
+# Đường dẫn lưu dataset & models
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATASET_DIR = os.path.join(BASE_DIR, 'dataset')
+MODELS_DIR = os.path.join(BASE_DIR, 'models')
 CSV_FILE = os.path.join(DATASET_DIR, 'flow_stats.csv')
 
 # Chu kỳ thu thập (giây)
@@ -60,6 +73,23 @@ class FlowMonitor(app_manager.OSKenApp):
         self.datapaths = {}
         self.monitor_thread = hub.spawn(self._monitor)
         self._init_csv()
+        self._load_ml_model()
+
+    def _load_ml_model(self):
+        """Tải mô hình XGBoost và Scaler để dự đoán Real-time."""
+        model_path = os.path.join(MODELS_DIR, 'xgboost_model.pkl')
+        scaler_path = os.path.join(MODELS_DIR, 'scaler.pkl')
+        
+        self.model = None
+        self.scaler = None
+        self.label_mapping = {0: 'DDOS', 1: 'NORMAL', 2: 'PORTSCAN'} # Dựa vào logs chạy lúc nãy
+
+        if os.path.exists(model_path) and os.path.exists(scaler_path):
+            self.model = joblib.load(model_path)
+            self.scaler = joblib.load(scaler_path)
+            self.logger.info("\033[92m[✓] Tải thành công mô hình XGBoost để Real-time Inference.\033[0m")
+        else:
+            self.logger.warning("[!] Không tìm thấy mô hình. Chạy train_model.py trước.")
 
     def _init_csv(self):
         """Khởi tạo file CSV với header nếu chưa tồn tại."""
@@ -231,6 +261,36 @@ class FlowMonitor(app_manager.OSKenApp):
             byte_per_sec = stat.byte_count / duration if duration > 0 else 0
             pkt_size_avg = stat.byte_count / stat.packet_count if stat.packet_count > 0 else 0
 
+            # --- REAL-TIME INFERENCE ---
+            if self.model and self.scaler:
+                features = {
+                    'ip_proto': ip_proto,
+                    'tp_src': tp_src,
+                    'tp_dst': tp_dst,
+                    'packet_count': stat.packet_count,
+                    'byte_count': stat.byte_count,
+                    'duration_sec': stat.duration_sec,
+                    'packet_count_per_sec': pkt_per_sec,
+                    'byte_count_per_sec': byte_per_sec,
+                    'packet_size_avg': pkt_size_avg,
+                    'flow_duration': duration
+                }
+                df_features = pd.DataFrame([features])
+                scaled_features = pd.DataFrame(
+                    self.scaler.transform(df_features),
+                    columns=df_features.columns
+                )
+                
+                prediction = self.model.predict(scaled_features)[0]
+                pred_label = self.label_mapping.get(prediction, 'UNKNOWN')
+                
+                if pred_label in ['DDOS', 'PORTSCAN']:
+                    self.logger.warning(
+                        "\033[91m[🚨 ALARM] PHÁT HIỆN TẤN CÔNG %s TỪ %s ĐẾN %s ! (FlowID: %s)\033[0m", 
+                        pred_label, ip_src, ip_dst, flow_id
+                    )
+            # ---------------------------
+
             row = [
                 timestamp,
                 datapath.id,
@@ -248,7 +308,7 @@ class FlowMonitor(app_manager.OSKenApp):
                 round(byte_per_sec, 4),
                 round(pkt_size_avg, 4),
                 round(duration, 4),
-                'normal'  # Label mặc định, đổi khi giả lập tấn công
+                get_current_label()  # Đọc label từ file current_label.txt
             ]
             rows.append(row)
 

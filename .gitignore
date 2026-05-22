@@ -17,3 +17,9 @@ ENV/
 .DS_Store
 Thumbs.db
 HUONG_DAN_THIEN.md
+
+# Temporary / Logs
+*.log
+read_docx.py
+test_setup.sh
+KhoaLuanTotNghiep.docx

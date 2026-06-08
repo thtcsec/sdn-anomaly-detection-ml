@@ -168,7 +168,7 @@ def main():
     model = train_xgboost(X_train_scaled, y_train)
 
     # 4. Evaluate
-    label_names = ['normal', 'ddos', 'portscan']  # Cập nhật theo labels thực tế
+    label_names = ['ddos', 'normal', 'portscan']  # Cập nhật theo labels thực tế
     y_pred, accuracy, f1 = evaluate_model(model, X_test_scaled, y_test, label_names)
 
     # 5. Visualize

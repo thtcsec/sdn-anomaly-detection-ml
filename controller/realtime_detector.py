@@ -23,7 +23,7 @@ MODEL_PATH = os.path.join(BASE_DIR, 'models', 'xgboost_model.pkl')
 SCALER_PATH = os.path.join(BASE_DIR, 'models', 'scaler.pkl')
 
 MONITOR_INTERVAL = 5
-LABEL_MAP = {0: 'NORMAL', 1: 'DDoS', 2: 'PORTSCAN'}
+LABEL_MAP = {0: 'DDOS', 1: 'NORMAL', 2: 'PORTSCAN'}
 
 
 class RealtimeDetector(app_manager.OSKenApp):

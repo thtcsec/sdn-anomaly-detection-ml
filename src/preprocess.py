@@ -125,6 +125,13 @@ def preprocess_pipeline():
     )
     print(f"[*] Train size: {len(X_train)}, Test size: {len(X_test)}")
 
+    # SMOTE - cân bằng dữ liệu (vì ddos ít hơn normal)
+    # CHỈ áp dụng cho tập TRAIN, KHÔNG BAO GIỜ áp dụng cho tập TEST
+    from imblearn.over_sampling import SMOTE
+    smote = SMOTE(random_state=42)
+    X_train, y_train = smote.fit_resample(X_train, y_train)
+    print(f"[*] After SMOTE: {len(X_train)} train samples")
+
     # 6. Save processed data
     train_df = pd.DataFrame(X_train, columns=X.columns)
     train_df['label'] = y_train

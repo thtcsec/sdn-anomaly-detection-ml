@@ -1,3 +1,4 @@
 Model,Approach,Classification,Accuracy,Precision,Recall,F1-Score
 XGBoost,Supervised,Multiclass,1.0,1.0,1.0,1.0
-Isolation Forest,Unsupervised,Binary,0.9030776297657327,0.9989512323020451,0.9011352885525071,0.9475254911713504
+Isolation Forest,Unsupervised,Binary,0.9828722002635046,0.9986244841815681,0.983739837398374,0.9911262798634812
+Autoencoder,Unsupervised,Binary,0.9982433025911287,0.9981965734896303,1.0,0.9990974729241877

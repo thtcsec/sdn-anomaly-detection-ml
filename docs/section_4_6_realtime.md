@@ -112,3 +112,65 @@ WARNING [2026-05-15 14:02:40] ⚠️ ALERT 10.0.0.6 -> 10.0.0.1 | proto=6 | pkts
 - Việc tích hợp trực tiếp mô hình vào controller giúp loại bỏ hoàn toàn sự phụ thuộc vào hệ thống bên ngoài, giảm thiểu điểm lỗi và đơn giản hóa kiến trúc triển khai.
 - Mô hình XGBoost được chọn cho real-time inference do có tốc độ dự đoán nhanh nhất và hiệu năng phân loại cao nhất trong ba mô hình đã thử nghiệm.
 - Hạn chế: Trong môi trường mạng thực tế với lưu lượng nền phức tạp, có thể cần tinh chỉnh thêm ngưỡng phân loại và mở rộng tập đặc trưng để giảm thiểu false positive.
+
+
+## 4.6.7. Cơ chế phản ứng tự động (Auto-Mitigation)
+
+Ngoài khả năng phát hiện, hệ thống còn tích hợp cơ chế phản ứng tự động nhằm cô lập kẻ tấn công ngay lập tức mà không cần sự can thiệp thủ công của quản trị viên:
+
+### Nguyên lý hoạt động
+
+1. **Đếm cảnh báo (Alert Counter):** Khi một IP nguồn bị phát hiện là tấn công, hệ thống tăng bộ đếm cảnh báo cho IP đó. Điều này tránh false positive đơn lẻ gây block nhầm.
+
+2. **Ngưỡng kích hoạt (Alert Threshold = 3):** Khi bộ đếm đạt ngưỡng 3 lần detect liên tiếp, hệ thống kích hoạt cơ chế chặn tự động.
+
+3. **Cài đặt DROP Rule:** Controller gửi FlowMod tới TẤT CẢ switches đã kết nối, cài đặt flow rule với:
+   - `match`: tất cả traffic có `ipv4_src = attacker_ip`
+   - `actions`: rỗng (DROP - không forward)
+   - `priority`: 100 (cao hơn flow rules thông thường)
+   - `hard_timeout`: 120 giây (tự gỡ sau 2 phút)
+
+4. **Tự động gỡ block (Auto-Unblock):** Sau khi `hard_timeout` hết hạn, switch tự xóa DROP rule và gửi FlowRemoved event về controller. Controller cập nhật trạng thái, cho phép IP đó giao tiếp bình thường trở lại.
+
+### Đoạn mã cốt lõi
+
+```python
+def _block_attacker(self, datapath, attacker_ip, attack_type):
+    """Cài đặt DROP rule trên tất cả switches để chặn attacker."""
+    match = parser.OFPMatch(
+        eth_type=ether_types.ETH_TYPE_IP,
+        ipv4_src=attacker_ip
+    )
+    # Actions rỗng = DROP
+    actions = []
+
+    for dp_id, dp in self.datapaths.items():
+        mod = dp_parser.OFPFlowMod(
+            datapath=dp,
+            priority=BLOCK_PRIORITY,      # 100 - cao hơn rules thường
+            match=dp_match,
+            instructions=dp_inst,
+            hard_timeout=BLOCK_TIMEOUT,   # 120s - tự gỡ
+            flags=OFPFF_SEND_FLOW_REM     # Notify khi hết hạn
+        )
+        dp.send_msg(mod)
+```
+
+### Ví dụ output khi auto-block kích hoạt
+
+```
+⚠️  ALERT [2026-05-15 14:02:35] 10.0.0.4 -> 10.0.0.1 | prediction=DDOS
+⚠️  ALERT [2026-05-15 14:02:40] 10.0.0.4 -> 10.0.0.1 | prediction=DDOS
+⚠️  ALERT [2026-05-15 14:02:45] 10.0.0.4 -> 10.0.0.1 | prediction=DDOS
+🚫 BLOCKED Attacker IP 10.0.0.4 on ALL switches | Attack: DDOS | Duration: 120s
+... (120 giây sau) ...
+🔓 UNBLOCKED IP 10.0.0.4 - block timeout expired (120s)
+```
+
+### Ưu điểm của cơ chế
+
+- **Phản ứng nhanh:** Chặn trong vòng 15 giây từ khi bắt đầu tấn công (3 chu kỳ × 5s).
+- **Tránh false positive:** Yêu cầu 3 lần detect liên tiếp trước khi block.
+- **Tự phục hồi:** hard_timeout đảm bảo không block vĩnh viễn nếu detect sai.
+- **Toàn diện:** DROP rule được cài trên TẤT CẢ switches, không chỉ switch phát hiện.
+- **Không cần can thiệp thủ công:** Hoàn toàn tự động từ detect → block → unblock.

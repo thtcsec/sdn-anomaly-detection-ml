@@ -1,6 +1,7 @@
 """
-Real-time Anomaly Detection Controller.
+Real-time Anomaly Detection Controller with Auto-Mitigation.
 Tích hợp XGBoost model vào os-ken controller để detect attack real-time.
+Khi phát hiện tấn công → tự động cài đặt DROP rule chặn IP nguồn tấn công.
 
 Chạy: python controller/run_realtime.py
 """
@@ -9,6 +10,7 @@ import os
 import numpy as np
 import joblib
 from datetime import datetime
+from collections import defaultdict
 
 from os_ken.base import app_manager
 from os_ken.controller import ofp_event
@@ -25,6 +27,12 @@ SCALER_PATH = os.path.join(BASE_DIR, 'models', 'scaler.pkl')
 MONITOR_INTERVAL = 5
 LABEL_MAP = {0: 'DDOS', 1: 'NORMAL', 2: 'PORTSCAN'}
 
+# === AUTO-MITIGATION CONFIG ===
+MITIGATION_ENABLED = True          # Bật/tắt auto-block
+ALERT_THRESHOLD = 3                # Số lần detect liên tiếp trước khi block
+BLOCK_TIMEOUT = 120                # Thời gian block IP (giây), sau đó tự mở
+BLOCK_PRIORITY = 100               # Priority cao để override flow rules khác
+
 
 class RealtimeDetector(app_manager.OSKenApp):
     """Controller với khả năng phát hiện tấn công real-time."""
@@ -36,15 +44,22 @@ class RealtimeDetector(app_manager.OSKenApp):
         self.datapaths = {}
         self.monitor_thread = hub.spawn(self._monitor)
 
+        # Mitigation state
+        self.alert_counter = defaultdict(int)  # IP → số lần bị detect
+        self.blocked_ips = set()               # Danh sách IP đã bị block
+
         # Load model
         if os.path.exists(MODEL_PATH) and os.path.exists(SCALER_PATH):
             self.model = joblib.load(MODEL_PATH)
             self.scaler = joblib.load(SCALER_PATH)
-            self.logger.info("Loaded XGBoost model successfully")
+            self.logger.info("\033[92m[✓] Loaded XGBoost model successfully\033[0m")
+            self.logger.info("\033[92m[✓] Auto-Mitigation: %s (threshold=%d, timeout=%ds)\033[0m",
+                            "ENABLED" if MITIGATION_ENABLED else "DISABLED",
+                            ALERT_THRESHOLD, BLOCK_TIMEOUT)
         else:
             self.model = None
             self.scaler = None
-            self.logger.warning("Model not found! Run train_model.py first.")
+            self.logger.warning("[!] Model not found! Run train_model.py first.")
 
     def _monitor(self):
         while True:
@@ -187,10 +202,91 @@ class RealtimeDetector(app_manager.OSKenApp):
 
             # Alert nếu phát hiện tấn công
             if label != 'NORMAL':
+                ip_src = stat.match['ipv4_src']
+                ip_dst = stat.match['ipv4_dst']
+
                 self.logger.warning(
-                    "⚠️  ALERT [%s] %s -> %s | proto=%d | "
-                    "pkts/s=%.1f | bytes/s=%.1f | prediction=%s",
-                    timestamp,
-                    stat.match['ipv4_src'], stat.match['ipv4_dst'],
+                    "\033[91m⚠️  ALERT [%s] %s -> %s | proto=%d | "
+                    "pkts/s=%.1f | bytes/s=%.1f | prediction=%s\033[0m",
+                    timestamp, ip_src, ip_dst,
                     ip_proto, pkt_per_sec, byte_per_sec, label
+                )
+
+                # === AUTO-MITIGATION ===
+                if MITIGATION_ENABLED and ip_src not in self.blocked_ips:
+                    self.alert_counter[ip_src] += 1
+
+                    if self.alert_counter[ip_src] >= ALERT_THRESHOLD:
+                        self._block_attacker(datapath, ip_src, label)
+
+    def _block_attacker(self, datapath, attacker_ip, attack_type):
+        """
+        Cài đặt DROP rule trên TẤT CẢ switches để chặn traffic từ attacker IP.
+        Rule có hard_timeout → tự động gỡ sau BLOCK_TIMEOUT giây.
+        """
+        if attacker_ip in self.blocked_ips:
+            return
+
+        self.blocked_ips.add(attacker_ip)
+        parser = datapath.ofproto_parser
+        ofproto = datapath.ofproto
+
+        # Match tất cả traffic từ attacker IP
+        match = parser.OFPMatch(
+            eth_type=ether_types.ETH_TYPE_IP,
+            ipv4_src=attacker_ip
+        )
+
+        # Actions rỗng = DROP (không forward gói tin đi đâu cả)
+        actions = []
+        inst = [parser.OFPInstructionActions(ofproto.OFPIT_APPLY_ACTIONS, actions)]
+
+        # Cài đặt DROP rule trên TẤT CẢ switches đã kết nối
+        for dp_id, dp in self.datapaths.items():
+            dp_parser = dp.ofproto_parser
+            dp_ofproto = dp.ofproto
+
+            dp_match = dp_parser.OFPMatch(
+                eth_type=ether_types.ETH_TYPE_IP,
+                ipv4_src=attacker_ip
+            )
+            dp_inst = [dp_parser.OFPInstructionActions(
+                dp_ofproto.OFPIT_APPLY_ACTIONS, [])]
+
+            mod = dp_parser.OFPFlowMod(
+                datapath=dp,
+                priority=BLOCK_PRIORITY,
+                match=dp_match,
+                instructions=dp_inst,
+                hard_timeout=BLOCK_TIMEOUT,  # Tự gỡ sau N giây
+                idle_timeout=0,
+                flags=dp_ofproto.OFPFF_SEND_FLOW_REM  # Notify khi rule bị xóa
+            )
+            dp.send_msg(mod)
+
+        self.logger.error(
+            "\033[91;1m🚫 BLOCKED [%s] Attacker IP %s on ALL switches | "
+            "Attack: %s | Duration: %ds | Alerts: %d\033[0m",
+            datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            attacker_ip, attack_type, BLOCK_TIMEOUT,
+            self.alert_counter[attacker_ip]
+        )
+
+        # Reset counter sau khi block
+        self.alert_counter[attacker_ip] = 0
+
+    @set_ev_cls(ofp_event.EventOFPFlowRemoved, MAIN_DISPATCHER)
+    def flow_removed_handler(self, ev):
+        """Xử lý khi DROP rule hết timeout → unblock IP."""
+        msg = ev.msg
+        match = msg.match
+
+        if 'ipv4_src' in match and msg.priority == BLOCK_PRIORITY:
+            unblocked_ip = match['ipv4_src']
+            if unblocked_ip in self.blocked_ips:
+                self.blocked_ips.discard(unblocked_ip)
+                self.logger.info(
+                    "\033[93m🔓 UNBLOCKED [%s] IP %s - block timeout expired (%ds)\033[0m",
+                    datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    unblocked_ip, BLOCK_TIMEOUT
                 )

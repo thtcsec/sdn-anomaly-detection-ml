@@ -1,0 +1,2 @@
+setting,n_real_rows,n_ddos_real,n_normal_real,n_portscan_real,split,accuracy,precision_macro,recall_macro,f1_macro,f1_weighted,full_model_acc_on_real
+real_only_retrain,10883,6,312,10565,stratified_80_20,1.0,1.0,1.0,1.0,1.0,1.0

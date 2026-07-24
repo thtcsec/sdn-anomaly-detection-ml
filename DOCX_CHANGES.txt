@@ -1,0 +1,80 @@
+DOCX CHANGES — đối chiếu KhoaLuanTotNghiep.docx vs backup
+========================================================================
+
+CÁCH XEM TRONG WORD:
+1. Đóng Word hoàn toàn rồi mở lại file KhoaLuanTotNghiep.docx
+2. Ctrl+F tìm đúng các cụm bên dưới (cột SAU)
+3. Mục lục (TOC): click phải Mục lục → Update Field / Cập nhật trường
+   (TOC hay giữ text cũ cho đến khi Update Field)
+
+## Phạm vi nghiên cứu (0.4)
+Tìm (Ctrl+F): Phạm vi:
+TRƯỚC: Phạm vi: Thực nghiệm trên tập dữ liệu InSDN và dữ liệu mô phỏng trong môi trường mạng giả lập bằng Mininet, sử dụng bộ điều khiển Ryu (hoặc ONOS).
+TRƯỚC: Phạm vi: Thực nghiệm trên tập dữ liệu InSDN và dữ liệu mô phỏng trong môi trường mạng giả lập bằng Mininet, sử dụng bộ điều khiển Ryu (hoặc ONOS).
+SAU  : Phạm vi: Thực nghiệm trên tập dữ liệu tự thu thập từ môi trường mạng SDN giả lập bằng Mininet, sử dụng bộ điều khiển os-ken (fork của Ryu). Tập dữ liệu công khai InSDN được tham khảo trong phần tổng quan và định hướng ph
+
+## Thu thập dữ liệu (0.5)
+Tìm (Ctrl+F): Thu thập dữ liệu:
+TRƯỚC: Thu thập dữ liệu: Sử dụng tập dữ liệu chuẩn và tự sinh traffic thực tế.
+TRƯỚC: Thu thập dữ liệu: Sử dụng tập dữ liệu chuẩn và tự sinh traffic thực tế.
+SAU  : Thu thập dữ liệu: Tự sinh và thu thập traffic OpenFlow trên testbed Mininet (normal, DDoS, portscan).
+
+## Tiền xử lý (0.5)
+Tìm (Ctrl+F): Tiền xử lý:
+TRƯỚC: Tiền xử lý: Trích xuất các đặc trưng dòng (Flow features) và tính toán các chỉ số thống kê (Entropy).
+TRƯỚC: Tiền xử lý: Trích xuất các đặc trưng dòng (Flow features) và tính toán các chỉ số thống kê (Entropy).
+SAU  : Tiền xử lý: Trích xuất đặc trưng dòng OpenFlow (10 features), làm sạch, chuẩn hóa StandardScaler và cân bằng SMOTE trên tập train.
+
+## Dataset synthetic (2.1)
+Tìm (Ctrl+F): DDoS synthetic
+TRƯỚC: - 506 mẫu DDoS
+TRƯỚC: - 506 mẫu DDoS
+SAU  : Các mẫu dữ liệu được trích xuất dưới dạng Flow Statistics từ giao thức OpenFlow và sử dụng cho quá trình huấn luyện và đánh giá mô hình học máy. Do lớp DDoS ban đầu thu được trên lab còn rất ít, nhóm bổ sung thêm mẫu DDo
+
+## Nhận xét 4.4
+Tìm (Ctrl+F): Cả ba mô hình đều đạt hiệu năng trên 98%
+TRƯỚC: Nhận xét: XGBoost vượt trội khi có nhãn; Isolation Forest là lựa chọn tốt nhất cho unsupervised; Cả ba mô hình đều đạt hiệu năng trên 98%. XGBoost vượt trội tuyệt đối (100%) nhờ khai thác nhãn huấn luyện. Trong nhóm unsu
+TRƯỚC: Nhận xét: XGBoost vượt trội khi có nhãn; Isolation Forest là lựa chọn tốt nhất cho unsupervised; Cả ba mô hình đều đạt hiệu năng trên 98%. XGBoost vượt trội tuyệt đối (100%) nhờ khai thác nhãn huấn luyện. Trong nhóm unsu
+SAU  : Cả ba mô hình đều đạt hiệu năng trên 98%. XGBoost vượt trội tuyệt đối (100%) nhờ khai thác nhãn huấn luyện. Trong nhóm unsupervised, Autoencoder (99.65%) vượt nhẹ Isolation Forest (98.16%) nhờ khả năng học phi tuyến của 
+
+## Hạn chế 4.5
+Tìm (Ctrl+F): Phạm vi nhãn còn hẹp
+TRƯỚC: (không tìm thấy)
+TRƯỚC: Chỉ 3 loại traffic, thực tế có nhiều biến thể tấn công hơn
+SAU  : Phạm vi nhãn còn hẹp: mới gồm Normal, DDoS và Portscan; chưa bao quát các biến thể tấn công nâng cao (slowloris, low-rate DDoS, exploitation).
+
+## CV K=10 (4.7.1)
+Tìm (Ctrl+F): K = 10
+TRƯỚC: (không tìm thấy)
+TRƯỚC: Để chứng minh tính ổn định và đảm bảo mô hình XGBoost không rơi vào hiện tượng quá khớp (Overfitting) do dữ liệu mất cân bằng sau khi xử lý bằng phương pháp SMOTE, nghiên cứu tiến hành thực nghiệm kiểm định chéo K-Fold p
+SAU  : Để chứng minh tính ổn định và đảm bảo mô hình XGBoost không rơi vào hiện tượng quá khớp (Overfitting) do dữ liệu mất cân bằng sau khi xử lý bằng phương pháp SMOTE, nghiên cứu tiến hành thực nghiệm kiểm định chéo K-Fold p
+
+## CV 99.96% (4.7.1)
+Tìm (Ctrl+F): 99.96%
+TRƯỚC: (không tìm thấy)
+TRƯỚC: Biểu đồ bên trái (10-Fold Cross-Validation Scores): Phân phối điểm số của cả 4 chỉ số cốt lõi bao gồm Accuracy, F1-Score (macro), Precision (macro), và Recall (macro) đều tập trung sát ngưỡng tuyệt đối ( hoặc ). Khoảng b
+SAU  : Biểu đồ bên trái (10-Fold Cross-Validation Scores): Phân phối điểm số của cả 4 chỉ số cốt lõi bao gồm Accuracy, F1-Score (macro), Precision (macro), và Recall (macro) đều tập trung sát ngưỡng tuyệt đối (Accuracy trung bì
+
+## Baseline số liệu (4.7.2)
+Tìm (Ctrl+F): 0.88–0.97
+TRƯỚC: (không tìm thấy)
+TRƯỚC: Nhóm phương pháp truyền thống (Static Threshold, Multi-Rule IDS, Z-Score): Có điểm Precision khá cao (từ  đến ), tuy nhiên chỉ số Recall và Accuracy lại thấp một cách báo động (Recall chỉ đạt từ  đến ). Điều này cho thấy
+SAU  : Nhóm phương pháp truyền thống (Static Threshold, Multi-Rule IDS, Z-Score): Có điểm Precision khá cao (khoảng 0.88–0.97), tuy nhiên Recall và Accuracy thấp rõ rệt (Recall chỉ khoảng 0.024–0.046). Các luật/ngưỡng tĩnh dễ b
+
+## SHAP tp_src (4.7.3)
+Tìm (Ctrl+F): Theo giá trị mean |SHAP|
+TRƯỚC: (không tìm thấy)
+TRƯỚC: byte_count_per_sec (Tốc độ byte trên giây): Được xác định là đặc trưng có tầm quan trọng cao nhất tổng thể (Mean |SHAP value| lớn nhất). Phân đoạn màu hồng đại diện cho Class 0 (Normal) chiếm tỷ trọng áp đảo, chứng tỏ tố
+SAU  : Theo giá trị mean |SHAP| trung bình trên các lớp, thứ tự đóng góp quan trọng nhất là: tp_src, byte_count_per_sec, packet_count, tp_dst và packet_count_per_sec. Trong đó tp_src (cổng nguồn) có mean |SHAP| cao nhất, phản á
+
+## Hình 13 caption
+Tìm (Ctrl+F): Hình 13.
+TRƯỚC: Hình 13. Đồ thị SHAP Feature Importance Summary Plot cho mô hình XGBoost	55
+TRƯỚC: Hình 13. Đồ thị SHAP Feature Importance Summary Plot cho mô hình XGBoost	55
+SAU  : Hình 13. Biểu đồ SHAP mean |value| (trung bình các lớp) của mô hình XGBoost	55
+
+## Bảng so sánh — hàng Autoencoder
+SAU  : ['Autoencoder', 'Unsupervised', 'Binary', '0.9965', '0.9982', '0.9982', '0.9982']
+TRƯỚC: ['Autoencoder', 'Unsupervised', 'Binary', '0.9965', '', '', '0.9982']
+
+File backup gốc: KhoaLuanTotNghiep.backup.docx

@@ -1,51 +1,71 @@
-# PHÂN VIỆC CHO THIỆN - Cập nhật 20/06/2026
+# Phân việc nhóm — cập nhật 24/07/2026
 
-## Tình hình hiện tại
+Phân theo thế mạnh: Tú phụ trách lab / demo hệ thống; Thiện phụ trách hoàn thiện báo cáo Word, đồng bộ số liệu và phần giải thích mô hình.
 
-Tú đã hoàn thành:
-- ✅ Thu thập thêm DDoS data (6 → 506 mẫu, gồm SYN/UDP/ICMP flood)
-- ✅ Train lại XGBoost: **99.91% accuracy**
-- ✅ Train lại Isolation Forest: **97% accuracy, AUC 0.9521**
-- ✅ Viết section 4.6 Real-time + Phụ lục
-- ✅ Push code lên nhánh `Tu` và merge vào `master`
+Hướng dẫn chỉnh Word chi tiết: `WORD_EDIT_FOR_THIEN.md`
 
 ---
 
-## VIỆC CẦN LÀM CỦA THIỆN
+## Đã cập nhật trong repo gần đây
 
-### Việc 1: Code — Tạo `src/train_autoencoder.py` + thêm SMOTE vào preprocess
-
-- Tạo file `src/train_autoencoder.py` — tự viết dựa trên kiến trúc `10→8→6→4→6→8→10`, train only normal data (label==1), threshold 95th percentile MSE.
-- Thêm SMOTE vào `src/preprocess.py` sau `train_test_split` — chỉ apply cho tập train.
-- Chạy lại full pipeline, đảm bảo model ra kết quả hợp lý.
-- Chạy `src/compare_models.py` cập nhật bảng so sánh.
-
-### Việc 2: Báo cáo — Viết đầy đủ các phần còn thiếu
-
-- **Chương 1** (Section 1.1 + 1.2): Đang là placeholder, cần viết nội dung.
-- **Section 4.3.2**: Nhận xét Isolation Forest — hiện chỉ 1 dòng.
-- **Section 4.4**: So sánh 3 model — hiện chỉ 1 dòng.
-
----
-
-## GIT WORKFLOW
+- Realtime canonical: `python controller/run_realtime.py` (+ dashboard)
+- Provenance: `is_synthetic` / `source` trên `dataset/flow_stats.csv`
+- Bootstrap DDoS từ seed lab: `src/bootstrap_real_ddos.py`
+- Đánh giá real-only: `src/eval_real_only.py` → `reports/real_only_metrics.csv`
+- Pipeline gộp: `python src/run_pipeline.py`
 
 ```bash
-git checkout master && git pull origin master
-git checkout -b Thien
-# ... làm việc ...
-git add -A && git commit -m "feat: autoencoder + SMOTE + báo cáo bổ sung"
-git push -u origin Thien
+# Retrain đầy đủ (nếu cần)
+python src/run_pipeline.py --bootstrap 0
+
+# Demo
+python controller/run_realtime.py
+python dashboard/app.py
+# http://127.0.0.1:5000
 ```
 
-Sau đó báo Tú để review + merge.
+Số liệu tham chiếu hiện tại: `reports/model_comparison.csv`, `reports/real_only_metrics.csv`
 
 ---
 
-## DEADLINE
+## Việc của Tú — Lab & demo
 
-- **Việc 1 (code):** 2 ngày
-- **Việc 2 (báo cáo):** 4 ngày
-- **Tổng:** 1 tuần
+### T1. (Nếu còn thời gian) Thu thêm Normal / DDoS trên Mininet
+`sudo python3 src/collect_ddos_extra.py`, tăng traffic normal (iperf/curl), rồi chạy lại provenance + pipeline.
 
-**Tú - 20/06/2026**
+### T2. Demo bảo vệ + screenshot phụ lục
+Chụp alert log, dashboard, blocked IP, topology — gửi Thiện để chèn phụ lục.
+
+---
+
+## Việc của Thiện — Báo cáo & đồng bộ số liệu
+
+### H1. Trang bìa + mục lục
+1. Điền thông tin bìa phụ còn thiếu (`docs/NOTE_FIX_TRANG_BIA.md`)
+2. Cập nhật trường Mục lục (Update Field)
+3. Kiểm tra caption Hình 13 (SHAP)
+
+### H2. Chỉnh nội dung theo checklist Word
+Làm theo từng mục trong `WORD_EDIT_FOR_THIEN.md` (phạm vi, dataset, SMOTE, hạn chế, real-only, kết luận, phân công).
+
+### H3. Đồng bộ số liệu Chương 4
+Cập nhật bảng/đoạn theo `reports/*.csv` sau lần train mới; thống nhất với phần Kết luận.
+
+### H4. (Khuyến nghị) Notebook demo SHAP
+`notebooks/shap_demo.ipynb` để trình bày nhanh khi bảo vệ.
+
+### H5. Báo cáo markdown cũ
+`Bao_cao_khoa_luan.md` là bản nháp cũ — ưu tiên Word làm bản chính; nếu giữ file markdown thì cập nhật số cho khớp hoặc ghi chú là bản lưu trữ.
+
+---
+
+## Timeline gợi ý
+
+| Người | Việc | Gợi ý |
+|-------|------|--------|
+| Thiện | H1 + H2 | sớm |
+| Thiện | H3 | ngay khi có CSV mới |
+| Tú | T2 screenshots | trước bảo vệ khoảng 1 tuần |
+| Thiện | H4 | trước bảo vệ vài ngày |
+
+InSDN chỉ nên làm thêm nếu phần Word/số liệu chính đã xong. Không mở rộng sang CICIDS2017.

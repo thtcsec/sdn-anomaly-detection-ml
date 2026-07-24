@@ -35,16 +35,31 @@ def load_data(filepath=RAW_CSV):
 
 
 def clean_data(df):
-    """Làm sạch dữ liệu: xóa duplicates, handle missing values."""
+    """Làm sạch dữ liệu: xóa duplicates, handle missing values trên cột ML."""
     initial_len = len(df)
 
-    # Xóa duplicates
+    # Provenance metadata: không được làm dropna nuốt mất hàng lab
+    if 'source' in df.columns:
+        df['source'] = df['source'].fillna('').astype(str)
+    if 'is_synthetic' in df.columns:
+        df['is_synthetic'] = df['is_synthetic'].fillna(0).astype(int)
+
+    # Xóa duplicates trên toàn bộ (sau khi chuẩn hóa provenance)
     df = df.drop_duplicates()
     print(f"[*] Removed {initial_len - len(df)} duplicate rows")
 
-    # Xóa rows có missing values
-    df = df.dropna()
+    feature_cols = [
+        'ip_proto', 'tp_src', 'tp_dst', 'packet_count', 'byte_count',
+        'duration_sec', 'packet_count_per_sec', 'byte_count_per_sec',
+        'packet_size_avg', 'flow_duration', 'label',
+    ]
+    present = [c for c in feature_cols if c in df.columns]
+    before_na = len(df)
+    df = df.dropna(subset=present)
+    print(f"[*] Dropped {before_na - len(df)} rows with NA in ML columns")
     print(f"[*] After cleaning: {len(df)} records")
+    if 'label' in df.columns:
+        print(f"[*] Label distribution after clean:\n{df['label'].value_counts()}")
 
     return df
 
@@ -75,7 +90,7 @@ def extract_features(df):
         print(f"[!] Available columns: {list(df.columns)}")
         sys.exit(1)
 
-    # Tạo DataFrame với features đã chọn
+    # Tạo DataFrame với features đã chọn (bỏ is_synthetic/source)
     X = df[feature_cols].copy()
     y = df['label'].copy()
 

@@ -102,8 +102,11 @@ def evaluate_autoencoder(X_test, y_test):
     """Evaluate Autoencoder (binary)."""
     try:
         from tensorflow import keras
-    except ImportError:
-        return None
+    except Exception:
+        try:
+            import tf_keras as keras
+        except ImportError:
+            return None
 
     model_path = os.path.join(MODELS_DIR, 'autoencoder_model.keras')
     scaler_path = os.path.join(MODELS_DIR, 'autoencoder_scaler.pkl')

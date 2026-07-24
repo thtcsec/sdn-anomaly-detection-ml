@@ -22,8 +22,13 @@ from sklearn.metrics import (
     accuracy_score, f1_score, precision_score, recall_score
 )
 
+import os as _os
+_os.environ.setdefault('TF_USE_LEGACY_KERAS', '1')
 import tensorflow as tf
-from tensorflow import keras
+try:
+    from tensorflow import keras
+except Exception:
+    import tf_keras as keras  # TF 2.16+ / 2.21 fallback
 
 # Reproducibility
 np.random.seed(42)

@@ -78,7 +78,8 @@ def generate_syn_flood(n=NUM_SYN_FLOOD):
             'byte_count_per_sec': byte_per_sec,
             'packet_size_avg': pkt_size_avg,
             'flow_duration': flow_duration,
-            'label': 'ddos'
+            'label': 'ddos',
+            'is_synthetic': 1,
         })
 
     return records
@@ -125,7 +126,8 @@ def generate_udp_flood(n=NUM_UDP_FLOOD):
             'byte_count_per_sec': byte_per_sec,
             'packet_size_avg': pkt_size_avg,
             'flow_duration': flow_duration,
-            'label': 'ddos'
+            'label': 'ddos',
+            'is_synthetic': 1,
         })
 
     return records
@@ -170,7 +172,8 @@ def generate_icmp_flood(n=NUM_ICMP_FLOOD):
             'byte_count_per_sec': byte_per_sec,
             'packet_size_avg': pkt_size_avg,
             'flow_duration': flow_duration,
-            'label': 'ddos'
+            'label': 'ddos',
+            'is_synthetic': 1,
         })
 
     return records

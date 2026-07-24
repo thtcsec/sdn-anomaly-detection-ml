@@ -9,6 +9,7 @@ imbalanced-learn==0.13.0
 
 # Deep Learning (Autoencoder)
 tensorflow==2.21.0
+tf_keras>=2.16.0
 
 # Data Processing
 pandas==3.0.3
@@ -17,6 +18,10 @@ numpy==2.4.5
 # Visualization
 matplotlib==3.10.9
 seaborn==0.13.2
+shap>=0.44.0
+
+# Dashboard
+flask>=3.0.0
 
 # Development Tools
 jupyter==1.1.1

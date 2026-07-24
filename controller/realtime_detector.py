@@ -20,9 +20,13 @@ from os_ken.lib.packet import packet, ethernet, ether_types, ipv4, tcp, udp
 from os_ken.lib import hub
 
 
+import json
+
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODEL_PATH = os.path.join(BASE_DIR, 'models', 'xgboost_model.pkl')
 SCALER_PATH = os.path.join(BASE_DIR, 'models', 'scaler.pkl')
+ALERT_LOG = os.path.join(BASE_DIR, 'dataset', 'alerts.json')
+MAX_ALERTS = 500
 
 MONITOR_INTERVAL = 5
 LABEL_MAP = {0: 'DDOS', 1: 'NORMAL', 2: 'PORTSCAN'}
@@ -47,6 +51,7 @@ class RealtimeDetector(app_manager.OSKenApp):
         # Mitigation state
         self.alert_counter = defaultdict(int)  # IP → số lần bị detect
         self.blocked_ips = set()               # Danh sách IP đã bị block
+        self.flows_analyzed = 0
 
         # Load model
         if os.path.exists(MODEL_PATH) and os.path.exists(SCALER_PATH):
@@ -60,6 +65,11 @@ class RealtimeDetector(app_manager.OSKenApp):
             self.model = None
             self.scaler = None
             self.logger.warning("[!] Model not found! Run train_model.py first.")
+
+        # Reset alert log khi start controller (tránh log cũ lẫn session mới)
+        os.makedirs(os.path.dirname(ALERT_LOG), exist_ok=True)
+        with open(ALERT_LOG, 'w', encoding='utf-8') as f:
+            json.dump([], f)
 
     def _monitor(self):
         while True:
@@ -199,12 +209,13 @@ class RealtimeDetector(app_manager.OSKenApp):
             features_scaled = self.scaler.transform(features)
             prediction = self.model.predict(features_scaled)[0]
             label = LABEL_MAP.get(prediction, 'UNKNOWN')
+            self.flows_analyzed += 1
+
+            ip_src = stat.match['ipv4_src']
+            ip_dst = stat.match['ipv4_dst']
 
             # Alert nếu phát hiện tấn công
             if label != 'NORMAL':
-                ip_src = stat.match['ipv4_src']
-                ip_dst = stat.match['ipv4_dst']
-
                 self.logger.warning(
                     "\033[91m⚠️  ALERT [%s] %s -> %s | proto=%d | "
                     "pkts/s=%.1f | bytes/s=%.1f | prediction=%s\033[0m",
@@ -212,12 +223,45 @@ class RealtimeDetector(app_manager.OSKenApp):
                     ip_proto, pkt_per_sec, byte_per_sec, label
                 )
 
+                blocked_now = False
                 # === AUTO-MITIGATION ===
                 if MITIGATION_ENABLED and ip_src not in self.blocked_ips:
                     self.alert_counter[ip_src] += 1
 
                     if self.alert_counter[ip_src] >= ALERT_THRESHOLD:
                         self._block_attacker(datapath, ip_src, label)
+                        blocked_now = True
+
+                self._append_alert({
+                    'timestamp': timestamp,
+                    'ip_src': ip_src,
+                    'ip_dst': ip_dst,
+                    'ip_proto': int(ip_proto),
+                    'packet_count_per_sec': float(pkt_per_sec),
+                    'byte_count_per_sec': float(byte_per_sec),
+                    'prediction': label,
+                    'blocked': blocked_now or (ip_src in self.blocked_ips),
+                    'flows_analyzed': self.flows_analyzed,
+                })
+
+    def _append_alert(self, alert):
+        """Ghi alert ra dataset/alerts.json (atomic) để Web Dashboard đọc."""
+        try:
+            alerts = []
+            if os.path.exists(ALERT_LOG):
+                with open(ALERT_LOG, 'r', encoding='utf-8') as f:
+                    alerts = json.load(f)
+                    if not isinstance(alerts, list):
+                        alerts = []
+            alerts.append(alert)
+            if len(alerts) > MAX_ALERTS:
+                alerts = alerts[-MAX_ALERTS:]
+            tmp_path = ALERT_LOG + '.tmp'
+            with open(tmp_path, 'w', encoding='utf-8') as f:
+                json.dump(alerts, f, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, ALERT_LOG)
+        except (OSError, json.JSONDecodeError) as exc:
+            self.logger.error("[!] Failed to write alert log: %s", exc)
 
     def _block_attacker(self, datapath, attacker_ip, attack_type):
         """

@@ -1,0 +1,4 @@
+Class,Precision,Recall,F1-Score,Support
+ddos,1.0,1.0,1.0,81
+normal,1.0,1.0,1.0,63
+portscan,1.0,1.0,1.0,2113

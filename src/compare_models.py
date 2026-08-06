@@ -60,6 +60,30 @@ def evaluate_xgboost(X_test, y_test):
     }
 
 
+def evaluate_random_forest(X_test, y_test):
+    """Evaluate Random Forest (multiclass)."""
+    model_path = os.path.join(MODELS_DIR, 'random_forest_model.pkl')
+    scaler_path = os.path.join(MODELS_DIR, 'random_forest_scaler.pkl')
+
+    if not os.path.exists(model_path):
+        return None
+
+    model = joblib.load(model_path)
+    scaler = joblib.load(scaler_path)
+    X_scaled = pd.DataFrame(scaler.transform(X_test), columns=X_test.columns)
+    y_pred = model.predict(X_scaled)
+
+    return {
+        'Model': 'Random Forest',
+        'Approach': 'Supervised',
+        'Classification': 'Multiclass',
+        'Accuracy': accuracy_score(y_test, y_pred),
+        'Precision': precision_score(y_test, y_pred, average='macro', zero_division=0),
+        'Recall': recall_score(y_test, y_pred, average='macro', zero_division=0),
+        'F1-Score': f1_score(y_test, y_pred, average='macro', zero_division=0),
+    }
+
+
 def evaluate_isolation_forest(X_test, y_test):
     """Evaluate Isolation Forest (binary)."""
     model_path = os.path.join(MODELS_DIR, 'isolation_forest_model.pkl')
@@ -163,6 +187,12 @@ def main():
         results.append(r)
         print(f"    Accuracy={r['Accuracy']:.4f}, F1={r['F1-Score']:.4f}")
 
+    print("[*] Evaluating Random Forest...")
+    r = evaluate_random_forest(X_test, y_test)
+    if r:
+        results.append(r)
+        print(f"    Accuracy={r['Accuracy']:.4f}, F1={r['F1-Score']:.4f}")
+
     print("[*] Evaluating Isolation Forest...")
     r = evaluate_isolation_forest(X_test, y_test)
     if r:
@@ -196,7 +226,7 @@ def main():
 
     fig, axes = plt.subplots(1, len(metrics), figsize=(16, 5))
 
-    colors = ['#2196F3', '#4CAF50', '#FF9800']
+    colors = ['#2196F3', '#9C27B0', '#4CAF50', '#FF9800']
 
     for i, metric in enumerate(metrics):
         values = df_results[metric].tolist()

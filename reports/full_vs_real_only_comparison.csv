@@ -1,0 +1,5 @@
+Model,Setting,Accuracy,Precision_macro,Recall_macro,F1_macro,Notes
+XGBoost,full,0.999113867966327,0.9996847911741528,0.9917695473251028,0.9956756543677072,official test.csv (lab+bootstrap pool); SMOTE train only
+XGBoost,real_only,1.0,1.0,1.0,1.0,is_synthetic==0; n_ddos_real=6; split=stratified_80_20; retrain no synthetic
+Random Forest,full,1.0,1.0,1.0,1.0,official test.csv (lab+bootstrap pool); SMOTE train only
+Random Forest,real_only,1.0,1.0,1.0,1.0,is_synthetic==0; n_ddos_real=6; n_test=2177; NO SMOTE; ~1 DDoS in stratified holdout possible; Acc=1.0 lab-only

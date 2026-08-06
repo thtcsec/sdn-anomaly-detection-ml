@@ -59,6 +59,7 @@ def build_stats(alerts):
         if a.get('blocked') and a.get('ip_src')
     })
     uptime_sec = int((datetime.now() - UPTIME_START).total_seconds())
+    last_alert_at = alerts[-1].get('timestamp') if alerts else None
     return {
         'total_flows_analyzed': flows,
         'total_attacks_detected': len(alerts),
@@ -67,6 +68,7 @@ def build_stats(alerts):
         'uptime_seconds': uptime_sec,
         'model_loaded': os.path.exists(os.path.join(MODELS_DIR, 'xgboost_model.pkl')),
         'alert_log_exists': os.path.exists(ALERT_LOG),
+        'last_alert_at': last_alert_at,
     }
 
 
@@ -94,10 +96,13 @@ def get_blocked():
 
 @app.route('/api/traffic_stats')
 def get_traffic_stats():
-    traffic = {'NORMAL': 0, 'DDOS': 0, 'PORTSCAN': 0}
+    # alerts.json chỉ ghi mẫu tấn công (controller bỏ NORMAL), nên đây là
+    # phân bố loại tấn công đã phát hiện — không phải toàn bộ traffic mạng.
+    traffic = {'DDOS': 0, 'PORTSCAN': 0}
     for a in load_alerts():
-        label = str(a.get('prediction', 'NORMAL')).upper()
-        traffic[label] = traffic.get(label, 0) + 1
+        label = str(a.get('prediction', '')).upper()
+        if label in traffic:
+            traffic[label] += 1
     return jsonify(traffic)
 
 

@@ -41,22 +41,26 @@
         .model-status .badge { padding: 3px 10px; border-radius: 12px; font-size: 11px; }
         .model-status .badge.loaded { background: #66bb6a33; color: #66bb6a; }
         .model-status .badge.missing { background: #ef535033; color: #ef5350; }
-        .traffic-bar { display: flex; height: 30px; border-radius: 6px; overflow: hidden; margin-top: 10px; }
-        .traffic-bar .segment { display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; }
+        .model-status .badge.idle { background: #ffa72633; color: #ffa726; }
+        .traffic-bar { display: flex; height: 30px; border-radius: 6px; overflow: hidden; margin-top: 10px; background: #263545; }
+        .traffic-bar .segment { display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; min-width: 0; }
         .traffic-bar .normal { background: #66bb6a; color: #fff; }
         .traffic-bar .ddos { background: #ef5350; color: #fff; }
         .traffic-bar .portscan { background: #ffa726; color: #fff; }
+        .empty-state { color: #78909c; font-size: 13px; padding: 12px 0; }
         .refresh-note { text-align: center; color: #546e7a; font-size: 12px; margin-top: 20px; }
+        @media (max-width: 900px) {
+            .stats-grid, .main-grid { grid-template-columns: 1fr; }
+        }
     </style>
 </head>
 <body>
     <div class="header">
-        <h1>&#128737; SDN Anomaly Detection System</h1>
+        <h1>SDN Anomaly Detection System</h1>
         <p>Real-time Network Intrusion Detection & Auto-Mitigation | XGBoost + os-ken Controller</p>
     </div>
 
     <div class="container">
-        <!-- Stats Cards -->
         <div class="stats-grid">
             <div class="stat-card success">
                 <div class="value" id="flows-analyzed">0</div>
@@ -71,67 +75,36 @@
                 <div class="label">IPs Blocked</div>
             </div>
             <div class="stat-card">
-                <div class="value" id="uptime">--</div>
-                <div class="label">System Uptime</div>
+                <div class="value" id="uptime">00:00:00</div>
+                <div class="label">Dashboard Uptime</div>
             </div>
         </div>
 
-        <!-- Main Content -->
         <div class="main-grid">
-            <!-- Alerts Panel -->
             <div class="panel">
-                <h2>&#9888;&#65039; Recent Alerts</h2>
+                <h2>Recent Alerts</h2>
                 <div id="alerts-container">
-                    <div class="alert-item ddos">
-                        <div class="time">2026-06-20 14:02:35</div>
-                        <div class="info">
-                            <span class="type ddos">DDOS</span>
-                            10.0.0.4 &#8594; 10.0.0.1 | proto=6 | pkts/s=104,673
-                        </div>
-                    </div>
-                    <div class="alert-item ddos">
-                        <div class="time">2026-06-20 14:02:40</div>
-                        <div class="info">
-                            <span class="type ddos">DDOS</span>
-                            10.0.0.5 &#8594; 10.0.0.2 | proto=17 | pkts/s=89,521
-                        </div>
-                    </div>
-                    <div class="alert-item portscan">
-                        <div class="time">2026-06-20 14:02:45</div>
-                        <div class="info">
-                            <span class="type portscan">PORTSCAN</span>
-                            10.0.0.6 &#8594; 10.0.0.1 | proto=6 | pkts/s=2,145
-                        </div>
-                    </div>
-                    <div class="alert-item ddos">
-                        <div class="time">2026-06-20 14:02:50</div>
-                        <div class="info">
-                            <span class="type ddos">DDOS</span>
-                            10.0.0.4 &#8594; 10.0.0.1 | proto=6 | pkts/s=98,234 | &#128683; AUTO-BLOCKED
-                        </div>
-                    </div>
+                    <div class="empty-state">Waiting for alerts from controller (<code>dataset/alerts.json</code>)...</div>
                 </div>
             </div>
 
-            <!-- Right Sidebar -->
             <div>
-                <!-- System Status -->
                 <div class="panel" style="margin-bottom: 15px;">
-                    <h2>&#9881;&#65039; System Status</h2>
+                    <h2>System Status</h2>
                     <div class="model-status">
-                        <span class="status-dot active"></span>
-                        <span class="name">os-ken Controller</span>
-                        <span class="badge loaded">Running</span>
+                        <span class="status-dot inactive" id="dot-feed"></span>
+                        <span class="name">Alert Feed</span>
+                        <span class="badge idle" id="badge-feed">Idle</span>
                     </div>
                     <div class="model-status">
-                        <span class="status-dot active"></span>
+                        <span class="status-dot inactive" id="dot-model"></span>
                         <span class="name">XGBoost Model</span>
-                        <span class="badge loaded" id="model-status">Loaded</span>
+                        <span class="badge missing" id="badge-model">Checking...</span>
                     </div>
                     <div class="model-status">
-                        <span class="status-dot active"></span>
+                        <span class="status-dot active" id="dot-mitigation"></span>
                         <span class="name">Auto-Mitigation</span>
-                        <span class="badge loaded">Enabled</span>
+                        <span class="badge loaded">Enabled (threshold=3)</span>
                     </div>
                     <div class="model-status">
                         <span class="status-dot active"></span>
@@ -140,70 +113,187 @@
                     </div>
                 </div>
 
-                <!-- Blocked IPs -->
                 <div class="panel" style="margin-bottom: 15px;">
-                    <h2>&#128683; Blocked IPs</h2>
+                    <h2>Blocked IPs</h2>
                     <div id="blocked-container">
-                        <div class="blocked-item">
-                            <span class="ip">10.0.0.4</span>
-                            <span class="status">DDOS | 120s remaining</span>
-                        </div>
-                        <div class="blocked-item">
-                            <span class="ip">10.0.0.5</span>
-                            <span class="status">DDOS | 95s remaining</span>
-                        </div>
+                        <div class="empty-state">No blocked IPs yet.</div>
                     </div>
                 </div>
 
-                <!-- Traffic Distribution -->
                 <div class="panel">
-                    <h2>&#128202; Traffic Distribution</h2>
-                    <div class="traffic-bar">
-                        <div class="segment normal" style="width: 60%;">Normal 60%</div>
-                        <div class="segment ddos" style="width: 25%;">DDoS 25%</div>
-                        <div class="segment portscan" style="width: 15%;">Scan 15%</div>
+                    <h2>Detected Attack Distribution</h2>
+                    <div class="traffic-bar" id="traffic-bar">
+                        <div class="empty-state" style="padding: 6px 12px;">No attack samples yet.</div>
                     </div>
                     <div style="margin-top: 15px; font-size: 12px; color: #78909c;">
-                        <p>&#9632; Detection Model: XGBoost (Accuracy: 100%)</p>
-                        <p>&#9632; Alert Threshold: 3 consecutive detections</p>
-                        <p>&#9632; Block Duration: 120 seconds (auto-unblock)</p>
+                        <p>Detection Model: XGBoost (Accuracy: 99.91%)</p>
+                        <p>Alert Threshold: 3 consecutive detections</p>
+                        <p>Block Duration: 120 seconds (auto-unblock)</p>
+                        <p id="last-alert">Last alert: —</p>
                     </div>
                 </div>
             </div>
         </div>
 
-        <div class="refresh-note">
-            Dashboard auto-refreshes every 5 seconds | SDN Anomaly Detection - HUFLIT K29
+        <div class="refresh-note" id="refresh-note">
+            Live poll every 2s | SDN Anomaly Detection - HUFLIT K29
         </div>
     </div>
 
     <script>
-        // Auto-refresh stats every 5 seconds
+        function esc(s) {
+            return String(s ?? '')
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('"', '&quot;');
+        }
+
+        function fmtPkts(v) {
+            const n = Number(v);
+            if (!Number.isFinite(n)) return '0';
+            return Math.round(n).toLocaleString();
+        }
+
+        function fmtUptime(sec) {
+            const s = Math.max(0, Number(sec) || 0);
+            const h = Math.floor(s / 3600);
+            const m = Math.floor((s % 3600) / 60);
+            const r = s % 60;
+            return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(r).padStart(2,'0')}`;
+        }
+
+        function setBadge(dotId, badgeId, ok, okText, badText, idle) {
+            const dot = document.getElementById(dotId);
+            const badge = document.getElementById(badgeId);
+            if (idle) {
+                dot.className = 'status-dot inactive';
+                badge.className = 'badge idle';
+                badge.textContent = badText;
+                return;
+            }
+            dot.className = ok ? 'status-dot active' : 'status-dot inactive';
+            badge.className = ok ? 'badge loaded' : 'badge missing';
+            badge.textContent = ok ? okText : badText;
+        }
+
+        function renderAlerts(alerts) {
+            const box = document.getElementById('alerts-container');
+            if (!alerts.length) {
+                box.innerHTML = '<div class="empty-state">Waiting for alerts from controller (<code>dataset/alerts.json</code>)...</div>';
+                return;
+            }
+            const latest = [...alerts].reverse().slice(0, 30);
+            box.innerHTML = latest.map(a => {
+                const pred = String(a.prediction || 'UNKNOWN').toUpperCase();
+                const cls = pred === 'PORTSCAN' ? 'portscan' : 'ddos';
+                const blocked = a.blocked ? ' | AUTO-BLOCKED' : '';
+                return `
+                    <div class="alert-item ${cls}">
+                        <div class="time">${esc(a.timestamp || '')}</div>
+                        <div class="info">
+                            <span class="type ${cls}">${esc(pred)}</span>
+                            ${esc(a.ip_src)} → ${esc(a.ip_dst)} | proto=${esc(a.ip_proto)} | pkts/s=${fmtPkts(a.packet_count_per_sec)}${blocked}
+                        </div>
+                    </div>`;
+            }).join('');
+        }
+
+        function renderBlocked(blocked) {
+            const box = document.getElementById('blocked-container');
+            if (!blocked.length) {
+                box.innerHTML = '<div class="empty-state">No blocked IPs yet.</div>';
+                return;
+            }
+            // Unique by IP, keep newest first
+            const seen = new Set();
+            const unique = [];
+            for (const a of [...blocked].reverse()) {
+                const ip = a.ip_src;
+                if (!ip || seen.has(ip)) continue;
+                seen.add(ip);
+                unique.push(a);
+            }
+            box.innerHTML = unique.map(a => `
+                <div class="blocked-item">
+                    <span class="ip">${esc(a.ip_src)}</span>
+                    <span class="status">${esc(String(a.prediction || '').toUpperCase())} | since ${esc(a.timestamp || '')}</span>
+                </div>
+            `).join('');
+        }
+
+        function renderTraffic(traffic) {
+            const box = document.getElementById('traffic-bar');
+            const ddos = Number(traffic.DDOS || 0);
+            const scan = Number(traffic.PORTSCAN || 0);
+            const total = ddos + scan;
+            if (!total) {
+                box.innerHTML = '<div class="empty-state" style="padding: 6px 12px;">No attack samples yet.</div>';
+                return;
+            }
+            const dPct = Math.round(ddos * 100 / total);
+            const sPct = 100 - dPct;
+            box.innerHTML = `
+                <div class="segment ddos" style="width:${dPct}%;">${dPct ? `DDoS ${dPct}%` : ''}</div>
+                <div class="segment portscan" style="width:${sPct}%;">${sPct ? `Scan ${sPct}%` : ''}</div>
+            `;
+        }
+
         async function refreshData() {
             try {
-                const resp = await fetch('/api/stats');
-                const data = await resp.json();
-                document.getElementById('flows-analyzed').textContent = data.total_flows_analyzed.toLocaleString();
-                document.getElementById('attacks-detected').textContent = data.total_attacks_detected;
-                document.getElementById('ips-blocked').textContent = data.total_ips_blocked;
-                document.getElementById('model-status').textContent = data.model_loaded ? 'Loaded' : 'Missing';
+                const [statsRes, alertsRes, blockedRes, trafficRes] = await Promise.all([
+                    fetch('/api/stats'),
+                    fetch('/api/alerts'),
+                    fetch('/api/blocked'),
+                    fetch('/api/traffic_stats'),
+                ]);
+                if (!statsRes.ok || !alertsRes.ok || !blockedRes.ok || !trafficRes.ok) {
+                    throw new Error('API error');
+                }
+                const stats = await statsRes.json();
+                const alerts = await alertsRes.json();
+                const blocked = await blockedRes.json();
+                const traffic = await trafficRes.json();
+
+                document.getElementById('flows-analyzed').textContent =
+                    Number(stats.total_flows_analyzed || 0).toLocaleString();
+                document.getElementById('attacks-detected').textContent =
+                    Number(stats.total_attacks_detected || 0).toLocaleString();
+                document.getElementById('ips-blocked').textContent =
+                    Number(stats.total_ips_blocked || 0).toLocaleString();
+                document.getElementById('uptime').textContent =
+                    fmtUptime(stats.uptime_seconds);
+
+                setBadge('dot-model', 'badge-model', !!stats.model_loaded, 'Loaded', 'Missing');
+
+                const last = stats.last_alert_at || (alerts.length ? alerts[alerts.length - 1].timestamp : null);
+                document.getElementById('last-alert').textContent = last
+                    ? `Last alert: ${last}`
+                    : 'Last alert: —';
+
+                const feedActive = !!stats.alert_log_exists && alerts.length > 0;
+                setBadge(
+                    'dot-feed',
+                    'badge-feed',
+                    feedActive,
+                    'Receiving',
+                    alerts.length ? 'Receiving' : 'Idle (no alerts)',
+                    !feedActive
+                );
+
+                renderAlerts(Array.isArray(alerts) ? alerts : []);
+                renderBlocked(Array.isArray(blocked) ? blocked : []);
+                renderTraffic(traffic || {});
+
+                document.getElementById('refresh-note').textContent =
+                    `Live poll every 2s | last refresh ${new Date().toLocaleTimeString()} | HUFLIT K29`;
             } catch (e) {
-                // Dashboard running in static mode
+                document.getElementById('refresh-note').textContent =
+                    `API unreachable — is dashboard/app.py running? (${e.message})`;
             }
         }
 
-        // Simulate uptime counter
-        let seconds = 0;
-        setInterval(() => {
-            seconds += 1;
-            const h = Math.floor(seconds / 3600);
-            const m = Math.floor((seconds % 3600) / 60);
-            const s = seconds % 60;
-            document.getElementById('uptime').textContent =
-                `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
-        }, 1000);
-
-        setInterval(refreshData, 5000);
+        setInterval(refreshData, 2000);
         refreshData();
     </script>
 </body>

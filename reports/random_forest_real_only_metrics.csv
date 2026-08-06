@@ -1,0 +1,2 @@
+setting,n_real_rows,n_ddos_real,n_normal_real,n_portscan_real,split,smote,n_train,n_test,accuracy,precision_macro,recall_macro,f1_macro,f1_weighted
+real_only_retrain_rf,10883,6,312,10565,stratified_80_20,False,8706,2177,1.0,1.0,1.0,1.0,1.0

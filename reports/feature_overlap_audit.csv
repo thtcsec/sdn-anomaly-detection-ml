@@ -1,0 +1,2 @@
+protocol,fold,n_train,n_test,n_overlap_fingerprints,n_test_rows_in_overlap,overlap_rate_of_test,notes
+legacy_official_train_test,-1,25356,2257,23,23,0.0101905183872397,Does not remove overlap; informational only

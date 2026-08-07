@@ -32,3 +32,16 @@ Tái tạo bảng
 Nếu thiếu real-only CSV:
   python src/eval_real_only.py
   python src/eval_rf_real_only.py
+
+Real-only StratifiedKFold (RF — kiểm chứng độ vững)
+----------------------------------------------------
+- Script: python src/train_random_forest_thesis.py
+- Outputs: reports/random_forest_cv_results.csv, random_forest_cv_folds.csv
+- K=5 trên is_synthetic==0, NO SMOTE, cùng hyperparams official RF.
+- Acc mean±std và F1_macro mean±std (F1 thường <1.0 vì n_ddos_real=6).
+- Đọc hướng dẫn viết luận văn: reports/rf_protocol_note.txt
+- Bảng tóm tắt mọi probe: reports/random_forest_thesis_protocols.csv
+
+Tái tạo thêm:
+  python src/train_random_forest_thesis.py
+

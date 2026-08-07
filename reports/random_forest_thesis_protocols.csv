@@ -1,0 +1,5 @@
+Protocol,Accuracy,Precision_macro,Recall_macro,F1_macro,Notes
+A_full_official,1.0,1.0,1.0,1.0,train.csv/test.csv; SMOTE train only
+B_real_only_80_20,1.0,1.0,1.0,1.0,is_synthetic==0; n_ddos_real=6; NO SMOTE
+C_real_only_cv_mean,0.9997243491448027,0.8878306878306879,0.9332702318977756,0.8994351010101009,StratifiedKFold K=5; Acc_std=0.000367; F1_std=0.134283
+F_domain_shift,0.9879705083430346,0.8900709219858157,0.9742310889443059,0.9207800826676139,train real-only; test=real_holdout+bootstrap; boot_ddos_acc=0.9225

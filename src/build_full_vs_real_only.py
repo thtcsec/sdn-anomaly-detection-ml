@@ -54,6 +54,13 @@ Cách viết trong luận văn (khuyến nghị)
   production: chênh lệch rất nhỏ; hệ realtime ưu tiên XGBoost vì latency suy luận.
 - Luôn nêu hạn chế: bootstrap DDoS, số DDoS real ít, real-only test nhỏ.
 
+Real-only StratifiedKFold (RF — kiểm chứng độ vững)
+----------------------------------------------------
+- Script: python src/train_random_forest_thesis.py
+- Outputs: reports/random_forest_cv_results.csv, random_forest_cv_folds.csv,
+  reports/rf_protocol_note.txt, reports/random_forest_thesis_protocols.csv
+- K=5 trên is_synthetic==0, NO SMOTE; F1_macro mean±std phản ánh n_ddos_real=6.
+
 Tái tạo bảng
 ------------
   python src/build_full_vs_real_only.py

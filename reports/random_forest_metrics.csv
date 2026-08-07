@@ -1,2 +1,2 @@
-Model,Approach,Classification,Accuracy,Precision,Recall,F1-Score,Train_Time_sec,Predict_Test_sec,Inference_ms_per_sample
-Random Forest,Supervised,Multiclass,1.0,1.0,1.0,1.0,0.6803651000000173,0.02605570000014268,21.513747100000273
+Model,Approach,Classification,Accuracy,Precision,Recall,F1-Score,Train_Time_sec
+Random Forest,Supervised,Multiclass,1.0,1.0,1.0,1.0,0.725649699990754

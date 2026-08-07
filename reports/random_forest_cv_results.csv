@@ -1,0 +1,2 @@
+protocol,k,n_real,n_ddos_real,smote,hyperparams,accuracy_mean,accuracy_std,precision_macro_mean,precision_macro_std,recall_macro_mean,recall_macro_std,f1_macro_mean,f1_macro_std
+real_only_stratified_kfold,5,10883,6,False,same_as_train_random_forest.py,0.9997243491448027,0.00036749929980738115,0.8878306878306879,0.14222474172623445,0.9332702318977756,0.13330183862273406,0.8994351010101009,0.1342832212682665

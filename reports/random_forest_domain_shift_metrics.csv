@@ -1,0 +1,2 @@
+setting,n_train_real,n_test_real_holdout,n_test_bootstrap_ddos,n_test_total,accuracy,precision_macro,recall_macro,f1_macro,real_holdout_accuracy,bootstrap_ddos_accuracy
+domain_shift_real_train_boot_test,8706,2177,400,2577,0.9879705083430346,0.8900709219858157,0.9742310889443059,0.9207800826676139,1.0,0.9225

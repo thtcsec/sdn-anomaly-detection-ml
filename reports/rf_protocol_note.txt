@@ -1,0 +1,32 @@
+RF PROTOCOL NOTE — dùng cho bảng luận văn
+============================================================
+
+QUYẾT ĐỊNH (primary protocol)
+-----------------------------
+Báo cáo SONG SONG: (A) Full official + Real-only 80/20, và (B) Real-only StratifiedKFold K=5 làm kiểm chứng độ vững.
+
+Lý do:
+- A/B/D/E (holdout đơn) đều cho Acc/F1 = 1.0000 trên lab dễ tách — hợp lệ nhưng dễ bị hiểu nhầm là 'hoàn hảo'.
+- Constrained RF (max_depth=8, min_samples_leaf=5) VẪN Acc=1.0 → KHÔNG dùng siêu tham số chặt hơn chỉ để 'hạ số'.
+- Real-only CV K=5 cho F1_macro mean±std < 1.0 một cách trung thực, vì n_ddos_real=6: một fold sai 1 mẫu DDoS làm macro-F1 tụt mạnh.
+
+SỐ LIỆU CHÍNH (sao chép vào Word)
+---------------------------------
+Full (official test.csv): Acc=1.0000  P=1.0000  R=1.0000  F1=1.0000
+Real-only 80/20 (NO SMOTE): Acc=1.0000  P=1.0000  R=1.0000  F1=1.0000
+Real-only StratifiedKFold K=5: Acc=0.9997±0.0004  F1_macro=0.8994±0.1343
+Per-fold F1_macro: 0.8332, 1.0000, 1.0000, 0.6640, 1.0000
+Domain-shift (optional): Acc=0.9880  F1=0.9208  (bootstrap DDoS Acc=0.9225; real holdout Acc=1.0000)
+
+CÁCH VIẾT TRONG LUẬN VĂN (tiếng Việt)
+------------------------------------
+"Trên tập kiểm thử chính thức (lab + bootstrap, SMOTE chỉ ở train), Random Forest đạt Accuracy = 1,0000 — cao nhất trên tập thực nghiệm hiện tại. Kết quả này phản ánh tính dễ tách của traffic trong môi trường lab, không được diễn giải là hiệu năng tuyệt đối trên mạng thực."
+
+"Khi đánh giá chỉ trên mẫu thực (is_synthetic=0; n_ddos_real=6) bằng Stratified 5-fold CV, Accuracy trung bình ≈ 0,9997±0,0004 nhưng F1-macro ≈ 0,8994±0,1343 — phương sai lớn vì lớp DDoS thực quá ít; một fold sai duy nhất một mẫu DDoS làm giảm mạnh macro-F1."
+
+model_comparison.csv: GIỮ hàng RF Acc=1.0 (official full).
+Bảng bổ sung: reports/random_forest_cv_results.csv + full_vs_real_only.
+
+Tái tạo:
+  python src/train_random_forest_thesis.py
+  python src/build_full_vs_real_only.py

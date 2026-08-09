@@ -14,8 +14,10 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import classification_report, confusion_matrix, roc_curve, auc
-
+from sklearn.metrics import (
+    classification_report, confusion_matrix, roc_curve, auc,
+    accuracy_score, f1_score, precision_score, recall_score,
+)
 # Reproducibility
 np.random.seed(42)
 
@@ -78,13 +80,33 @@ def main():
     # Anomaly scores (lower = more anomalous)
     anomaly_scores = -iso_forest.decision_function(X_test_scaled)
 
-    # 6. Evaluate
+    # 6. Evaluate — P/R/F1 = Anomaly-class (binary positive), NOT macro
+    acc = accuracy_score(y_test_binary, y_pred_binary)
+    prec = precision_score(y_test_binary, y_pred_binary, zero_division=0)
+    rec = recall_score(y_test_binary, y_pred_binary)
+    f1 = f1_score(y_test_binary, y_pred_binary)
+    prec_macro = precision_score(y_test_binary, y_pred_binary, average='macro', zero_division=0)
+    rec_macro = recall_score(y_test_binary, y_pred_binary, average='macro')
+    f1_macro = f1_score(y_test_binary, y_pred_binary, average='macro')
+    cm_counts = confusion_matrix(y_test_binary, y_pred_binary)
+    tn, fp, fn, tp = cm_counts.ravel()
+    fpr_rate = fp / (fp + tn) if (fp + tn) else 0.0
+    fnr_rate = fn / (fn + tp) if (fn + tp) else 0.0
+
     print("\n" + "=" * 60)
     print("  ISOLATION FOREST EVALUATION (Binary: Normal vs Anomaly)")
+    print("  Precision/Recall/F1 = Anomaly-class (positive=Anomaly)")
+    print("=" * 60)
+    print(f"  Accuracy:            {acc:.4f}")
+    print(f"  Precision (Anomaly): {prec:.4f}")
+    print(f"  Recall (Anomaly):    {rec:.4f}")
+    print(f"  F1 (Anomaly):        {f1:.4f}")
+    print(f"  Macro P/R/F1:        {prec_macro:.4f} / {rec_macro:.4f} / {f1_macro:.4f}")
+    print(f"  FPR: {fpr_rate:.4f}  FNR: {fnr_rate:.4f}")
+    print(f"  contamination=0.05 = expected outlier rate on FIT data, NOT dataset attack ratio")
     print("=" * 60)
     print(classification_report(y_test_binary, y_pred_binary,
                                 target_names=['Normal', 'Anomaly']))
-
     # 7. ROC Curve
     fpr, tpr, _ = roc_curve(y_test_binary, anomaly_scores)
     roc_auc = auc(fpr, tpr)
@@ -130,10 +152,34 @@ def main():
     plt.close()
     print("[✓] Saved: reports/isolation_forest_score_dist.png")
 
-    # 10. Save model
+    # 10. Save model + metrics
     joblib.dump(iso_forest, os.path.join(MODELS_DIR, 'isolation_forest_model.pkl'))
     joblib.dump(scaler, os.path.join(MODELS_DIR, 'isolation_forest_scaler.pkl'))
+    pd.DataFrame(
+        [
+            {
+                "MetricScope": "anomaly_class_binary",
+                "Accuracy": acc,
+                "Precision_Anomaly": prec,
+                "Recall_Anomaly": rec,
+                "F1_Anomaly": f1,
+                "Precision_macro": prec_macro,
+                "Recall_macro": rec_macro,
+                "F1_macro": f1_macro,
+                "FPR": fpr_rate,
+                "FNR": fnr_rate,
+                "AUC": roc_auc,
+                "contamination": 0.05,
+                "TN": int(tn),
+                "FP": int(fp),
+                "FN": int(fn),
+                "TP": int(tp),
+                "score_note": "plot uses -decision_function (sklearn), not Liu s(x) in 0..1",
+            }
+        ]
+    ).to_csv(os.path.join(REPORTS_DIR, "isolation_forest_metrics.csv"), index=False)
     print("[✓] Saved: models/isolation_forest_model.pkl")
+    print("[✓] Saved: reports/isolation_forest_metrics.csv")
 
     print(f"\n[✓] Isolation Forest training complete!")
     print(f"[*] AUC Score: {roc_auc:.4f}")

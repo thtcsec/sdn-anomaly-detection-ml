@@ -117,7 +117,19 @@ def scale_features(X_train, X_test):
 
 
 def preprocess_pipeline():
-    """Pipeline tiền xử lý hoàn chỉnh."""
+    """Pipeline tiền xử lý hoàn chỉnh.
+
+    Thứ tự THỰC TẾ (đúng để tránh leakage scaler/SMOTE):
+      clean → extract features → encode → train/test split
+      → SMOTE chỉ trên TRAIN → lưu CSV
+
+    StandardScaler KHÔNG chạy ở đây; mỗi script train tự fit scaler trên TRAIN.
+
+    Lưu ý provenance: nếu flow_stats.csv đã chứa mẫu bootstrap (is_synthetic=1)
+    TRƯỚC bước split (pipeline mặc định hiện tại), synthetic có thể vào cả
+    train và test → phải disclose trong luận văn. Hướng an toàn hơn:
+    bootstrap chỉ từ DDoS thuộc TRAIN sau split (xem docs/THESIS_EVALUATION_PROTOCOL.md).
+    """
     print("=" * 60)
     print("  SDN Flow Data Preprocessing Pipeline")
     print("=" * 60)
@@ -134,14 +146,13 @@ def preprocess_pipeline():
     # 4. Encode labels
     y_encoded, label_encoder = encode_labels(y)
 
-    # 5. Split train/test
+    # 5. Split train/test TRƯỚC SMOTE / scaler
     X_train, X_test, y_train, y_test = train_test_split(
         X, y_encoded, test_size=0.2, random_state=42, stratify=y_encoded
     )
     print(f"[*] Train size: {len(X_train)}, Test size: {len(X_test)}")
 
-    # SMOTE - cân bằng dữ liệu (vì ddos ít hơn normal)
-    # CHỈ áp dụng cho tập TRAIN, KHÔNG BAO GIỜ áp dụng cho tập TEST
+    # 6. SMOTE chỉ trên TRAIN — không bao giờ trên TEST
     from imblearn.over_sampling import SMOTE
     smote = SMOTE(random_state=42)
     X_train, y_train = smote.fit_resample(X_train, y_train)

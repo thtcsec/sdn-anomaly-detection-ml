@@ -32,5 +32,11 @@ Collection targets only Mininet hosts `10.0.0.1`–`10.0.0.6`. No Internet / ext
 ## Suggested Word wording (RF Acc=1.0)
 > Trên benchmark nội bộ (random-flow split, có mẫu bootstrap trong pool), Random Forest đạt Accuracy=1,0000 — cao nhất trên tập thực nghiệm hiện tại. Kết quả phản ánh traffic lab dễ tách lớp và không được diễn giải như hiệu năng tuyệt đối trên mạng thật. Để đánh giá độ vững theo phiên thu thập độc lập, nghiên cứu bổ sung protocol grouped real-only (tách theo `run_id`, loại synthetic khỏi test). Khi chưa đủ số run độc lập, protocol được mô tả nhưng chưa dùng để kết luận số liệu chính.
 
+## Autoencoder / Isolation Forest metric labels
+- AE/IF **Precision/Recall/F1** in tables = **Anomaly-class** (binary positive), not macro.
+- AE Acc must match confusion matrix with **train** threshold (`models/autoencoder_threshold.pkl`, ~0.0473). Never use prose threshold 2.355.
+- Sync helper: `python src/sync_ae_threshold_metrics.py`
+- Details for Word edits: `WORD_EDIT_FOR_THIEN.md`
+
 ## Suggested placement
 After the 4-model comparison table: section “Đánh giá bổ sung Full / Real-only / Grouped-by-run”.

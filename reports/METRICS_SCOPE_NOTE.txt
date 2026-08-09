@@ -1,0 +1,5 @@
+XGBoost / Random Forest: Accuracy + Precision/Recall/F1 = MACRO (multiclass).
+Autoencoder / Isolation Forest: Accuracy = binary overall; Precision/Recall/F1 = Anomaly-class (positive=Anomaly), NOT macro.
+AE Threshold = 95th percentile of Normal-TRAIN reconstruction MSE (saved in models/autoencoder_threshold.pkl).
+AE Threshold value: 0.047290
+Do NOT recompute AE threshold on test normals.

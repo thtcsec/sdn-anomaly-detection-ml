@@ -167,18 +167,30 @@ def main():
     # =========================
     # EVALUATION
     # =========================
+    # P/R/F1 dưới đây = binary, positive class = Anomaly (KHÔNG phải macro)
     acc = accuracy_score(y_test_bin, y_pred_bin)
     f1 = f1_score(y_test_bin, y_pred_bin)
     prec = precision_score(y_test_bin, y_pred_bin, zero_division=0)
     rec = recall_score(y_test_bin, y_pred_bin)
+    f1_macro = f1_score(y_test_bin, y_pred_bin, average='macro')
+    prec_macro = precision_score(y_test_bin, y_pred_bin, average='macro', zero_division=0)
+    rec_macro = recall_score(y_test_bin, y_pred_bin, average='macro', zero_division=0)
+    cm = confusion_matrix(y_test_bin, y_pred_bin)
+    tn, fp, fn, tp = cm.ravel()
+    fpr = fp / (fp + tn) if (fp + tn) else 0.0
+    fnr = fn / (fn + tp) if (fn + tp) else 0.0
 
     print("\n" + "=" * 60)
     print("  AUTOENCODER EVALUATION (Binary: Normal vs Anomaly)")
+    print("  Precision/Recall/F1 = Anomaly-class (positive=Anomaly)")
     print("=" * 60)
-    print(f"  Accuracy:  {acc:.4f}")
-    print(f"  Precision: {prec:.4f}")
-    print(f"  Recall:    {rec:.4f}")
-    print(f"  F1-Score:  {f1:.4f}")
+    print(f"  Accuracy:              {acc:.4f}")
+    print(f"  Precision (Anomaly):   {prec:.4f}")
+    print(f"  Recall (Anomaly):      {rec:.4f}")
+    print(f"  F1-Score (Anomaly):    {f1:.4f}")
+    print(f"  Precision/Recall/F1 macro: {prec_macro:.4f} / {rec_macro:.4f} / {f1_macro:.4f}")
+    print(f"  FPR (Normal→Anomaly):  {fpr:.4f}  FNR: {fnr:.4f}")
+    print(f"  Threshold (train Normal 95th MSE): {threshold:.6f}")
     print("=" * 60)
     print(classification_report(y_test_bin, y_pred_bin,
                                 target_names=['Normal', 'Anomaly']))
@@ -205,7 +217,6 @@ def main():
     # =========================
     # CONFUSION MATRIX
     # =========================
-    cm = confusion_matrix(y_test_bin, y_pred_bin)
     plt.figure(figsize=(6, 5))
     sns.heatmap(cm, annot=True, fmt='d', cmap='Oranges',
                 xticklabels=['Normal', 'Anomaly'],
@@ -251,16 +262,48 @@ def main():
     print("[✓] Saved: reports/autoencoder_error_dist.png")
 
     # =========================
-    # SAVE MODEL
+    # SAVE MODEL + THRESHOLD + METRICS
     # =========================
     model.save(os.path.join(MODELS_DIR, "autoencoder_model.keras"))
     joblib.dump(scaler, os.path.join(MODELS_DIR, "autoencoder_scaler.pkl"))
+    joblib.dump(
+        {
+            "threshold": float(threshold),
+            "percentile": 95,
+            "source": "normal_train_mse",
+            "note": "Fit on Normal-train reconstruction MSE only; never recompute on test",
+        },
+        os.path.join(MODELS_DIR, "autoencoder_threshold.pkl"),
+    )
+    pd.DataFrame(
+        [
+            {
+                "MetricScope": "anomaly_class_binary",
+                "Accuracy": acc,
+                "Precision_Anomaly": prec,
+                "Recall_Anomaly": rec,
+                "F1_Anomaly": f1,
+                "Precision_macro": prec_macro,
+                "Recall_macro": rec_macro,
+                "F1_macro": f1_macro,
+                "FPR": fpr,
+                "FNR": fnr,
+                "AUC": roc_auc,
+                "Threshold": float(threshold),
+                "TN": int(tn),
+                "FP": int(fp),
+                "FN": int(fn),
+                "TP": int(tp),
+            }
+        ]
+    ).to_csv(os.path.join(REPORTS_DIR, "autoencoder_metrics.csv"), index=False)
 
     print(f"\n[✓] Autoencoder training complete!")
     print(f"[*] AUC Score: {roc_auc:.4f}")
     print(f"[*] Accuracy: {acc:.4f}")
-    print(f"[*] F1-Score: {f1:.4f}")
-
+    print(f"[*] F1-Score (Anomaly): {f1:.4f}")
+    print(f"[✓] Saved: models/autoencoder_threshold.pkl ({threshold:.6f})")
+    print(f"[✓] Saved: reports/autoencoder_metrics.csv")
 
 if __name__ == "__main__":
     main()

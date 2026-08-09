@@ -114,17 +114,18 @@ def evaluate_isolation_forest(X_test, y_test):
     return {
         'Model': 'Isolation Forest',
         'Approach': 'Unsupervised',
-        'Classification': 'Binary',
+        'Classification': 'Binary (P/R/F1=Anomaly-class)',
         'Accuracy': acc,
         'Precision': prec,
         'Recall': rec,
         'F1-Score': f1,
     }
 
-
 def evaluate_autoencoder(X_test, y_test):
-    """Evaluate Autoencoder (binary)."""
+    """Evaluate Autoencoder (binary). Threshold MUST come from training, not test."""
     try:
+        import os as _os
+        _os.environ.setdefault('TF_USE_LEGACY_KERAS', '1')
         from tensorflow import keras
     except Exception:
         try:
@@ -134,6 +135,7 @@ def evaluate_autoencoder(X_test, y_test):
 
     model_path = os.path.join(MODELS_DIR, 'autoencoder_model.keras')
     scaler_path = os.path.join(MODELS_DIR, 'autoencoder_scaler.pkl')
+    thr_path = os.path.join(MODELS_DIR, 'autoencoder_threshold.pkl')
 
     if not os.path.exists(model_path):
         return None
@@ -145,13 +147,22 @@ def evaluate_autoencoder(X_test, y_test):
     X_pred = model.predict(X_scaled, verbose=0)
     mse = np.mean(np.power(X_scaled - X_pred, 2), axis=1)
 
-    # Threshold from normal data
-    normal_mask = (y_test == 1)
-    threshold = np.percentile(mse[normal_mask], 95)
+    if os.path.exists(thr_path):
+        thr_obj = joblib.load(thr_path)
+        threshold = float(thr_obj['threshold'] if isinstance(thr_obj, dict) else thr_obj)
+        print(f"    [AE] Using saved train threshold={threshold:.6f}")
+    else:
+        normal_mask = (y_test == 1)
+        threshold = float(np.percentile(mse[normal_mask], 95))
+        print(
+            f"    [AE][WARN] threshold.pkl missing → recomputed on TEST normals "
+            f"({threshold:.6f}); run src/sync_ae_threshold_metrics.py"
+        )
 
     y_pred_binary = (mse > threshold).astype(int)
     y_test_binary = (y_test != 1).astype(int)
 
+    # P/R/F1 = Anomaly-class (binary positive), not macro
     acc = accuracy_score(y_test_binary, y_pred_binary)
     f1 = f1_score(y_test_binary, y_pred_binary)
     prec = precision_score(y_test_binary, y_pred_binary, zero_division=0)
@@ -160,13 +171,12 @@ def evaluate_autoencoder(X_test, y_test):
     return {
         'Model': 'Autoencoder',
         'Approach': 'Unsupervised',
-        'Classification': 'Binary',
+        'Classification': 'Binary (P/R/F1=Anomaly-class)',
         'Accuracy': acc,
         'Precision': prec,
         'Recall': rec,
         'F1-Score': f1,
     }
-
 
 def main():
     print("=" * 60)

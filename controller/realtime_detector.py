@@ -8,9 +8,17 @@ Chạy: python controller/run_realtime.py
 
 import os
 import numpy as np
+import pandas as pd
 import joblib
 from datetime import datetime
 from collections import defaultdict
+
+FEATURE_COLS = [
+    'ip_proto', 'tp_src', 'tp_dst',
+    'packet_count', 'byte_count', 'duration_sec',
+    'packet_count_per_sec', 'byte_count_per_sec',
+    'packet_size_avg', 'flow_duration',
+]
 
 from os_ken.base import app_manager
 from os_ken.controller import ofp_event
@@ -198,14 +206,13 @@ class RealtimeDetector(app_manager.OSKenApp):
             byte_per_sec = stat.byte_count / duration if duration > 0 else 0
             pkt_size_avg = stat.byte_count / stat.packet_count if stat.packet_count > 0 else 0
 
-            # Feature vector (10 features, same order as training)
-            features = np.array([[
+            # DataFrame với đúng tên cột lúc fit scaler → tránh warning feature names
+            features = pd.DataFrame([[
                 ip_proto, tp_src, tp_dst,
                 stat.packet_count, stat.byte_count, stat.duration_sec,
                 pkt_per_sec, byte_per_sec, pkt_size_avg, duration
-            ]])
+            ]], columns=FEATURE_COLS)
 
-            # Scale + Predict
             features_scaled = self.scaler.transform(features)
             prediction = self.model.predict(features_scaled)[0]
             label = LABEL_MAP.get(prediction, 'UNKNOWN')

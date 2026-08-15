@@ -1,0 +1,7 @@
+model,heldout_label,metric,n_scenarios,mean,median,min,max,note
+RandomForest,ddos,episode_detection_rate,7,0.8571428571428571,1.0,0.0,1.0,scenario-weighted; no resampling or synthetic rows
+RandomForest,normal,normal_false_alert_rate,4,0.8333333333333334,1.0,0.3333333333333333,1.0,scenario-weighted; no resampling or synthetic rows
+RandomForest,portscan,episode_detection_rate,8,0.875,1.0,0.0,1.0,scenario-weighted; no resampling or synthetic rows
+XGBoost,ddos,episode_detection_rate,7,0.8571428571428571,1.0,0.0,1.0,scenario-weighted; no resampling or synthetic rows
+XGBoost,normal,normal_false_alert_rate,4,0.8333333333333334,1.0,0.3333333333333333,1.0,scenario-weighted; no resampling or synthetic rows
+XGBoost,portscan,episode_detection_rate,8,0.875,1.0,0.0,1.0,scenario-weighted; no resampling or synthetic rows

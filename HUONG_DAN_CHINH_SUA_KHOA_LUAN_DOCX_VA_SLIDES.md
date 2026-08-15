@@ -1,84 +1,112 @@
-# 📘 HƯỚNG DẪN ĐỒNG BỘ SỐ LIỆU & HÌNH ẢNH VÀO FILE WORD VÀ SLIDES
-*(Tài liệu chuẩn dành cho bạn Tú & Thiện để cập nhật Khóa Luận Tốt Nghiệp và Slide Thuyết Trình)*
+# Hướng dẫn sửa Word & Slides (Thiện copy số ở đây)
+
+Chỉ dùng số mục 1–2 trên slide/chương Kết quả. **Không** dùng 231.314 / 20k Normal giả / Acc 0,80 / Acc 0,9999 làm số chính.
+
+Người sửa: Trần Minh Thiện. Nguồn số: `reports/binary_realtime_loso_summary.csv`.
 
 ---
 
-## 🎯 PHẦN A: BẢNG TỔNG HỢP SỐ LIỆU CHUẨN XÁC 100% (COPY-PASTE VÀO BÁO CÁO)
+## 1. Dataset (bảng phân phối + slide Dataset)
 
-### 1. Bảng phân phối Dataset SDN Thực nghiệm (Thay thế Bảng 15 trong Word & Slide 10)
+Pool train/controller: independent OpenFlow, `run_id` thật.
 
-| Nhãn (Label) | Số lượng mẫu (Flows) | Tỷ lệ (%) | Nguồn gốc dữ liệu |
-| :--- | :---: | :---: | :--- |
-| **Portscan** | **166.812 mẫu** | 72,11% | Thực nghiệm Mininet SDN (Nmap đa cổng, đa tốc độ) |
-| **DDoS** | **43.612 mẫu** | 18,85% | Thực nghiệm Mininet SDN (24 đợt chạy độc lập SYN/UDP/ICMP Flood) |
-| **Normal** | **20.890 mẫu** | 9,03% | Thực nghiệm Mininet SDN (Lưu lượng Web HTTP, DNS, SSH, Ping, Iperf) |
-| **TỔNG CỘNG** | **231.314 mẫu** | **100%** | **Dữ liệu thực nghiệm OpenFlow 1.3 switch statistics** |
+| Nhãn | Số mẫu (poll 5s) | Tỷ lệ | Nguồn |
+|------|------------------|-------|--------|
+| DDoS | **43.206** | 54,61% | 11 run hping3 (SYN/UDP/ICMP, multiport) |
+| Portscan | **20.238** | 25,58% | 12 run nmap (SYN/connect, nhiều dải cổng) |
+| Normal | **15.670** | 19,81% | 9 run ping/iperf/HTTP thật qua switch |
+| **Tổng** | **79.114 snapshot** | 100% | **32 `run_id` · 19 `scenario_id`** |
 
-- **Phân chia:** Train Set (80%): 185.051 mẫu (sau SMOTE: 400.347 mẫu) | Test Set (20%): **46.263 mẫu** (độc lập, không can thiệp SMOTE).
+Phải viết ngay dưới bảng:
 
----
+> 79.114 là số lần controller poll OpenFlow mỗi 5 giây, không phải 79.114 phiên traffic độc lập. Gộp last-poll theo 5-tuple còn **23.843** mẫu. Đánh giá generalization tách theo **19 kịch bản**.
 
-### 2. Bảng so sánh hiệu năng 4 mô hình ML (Thay thế Bảng 11 trong Word & Slide 12)
+- Bảng luận văn cũ **11.283** (DDoS lúc đầu 6 mẫu thật + 400 bootstrap) **giữ như lịch sử**.
+- Train 80/20 + SMOTE chỉ là pipeline phụ lục, không phải số chính.
 
-| Mô hình (Model) | Hướng tiếp cận | Loại phân loại | Accuracy | Precision (macro) | Recall (macro) | F1-Score (macro) | ROC-AUC (macro) | PR-AUC | Độ trễ (Latency) |
-| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **XGBoost** | Supervised | Multiclass | **0.8047** | **0.8189** | **0.9073** | **0.8285** | **0.9252** | — | **0.39 ms** |
-| **Random Forest** | Supervised | Multiclass | **0.7942** | **0.8065** | **0.9033** | **0.8176** | **0.9274** | — | **15.84 ms** |
-| **Autoencoder** | Unsupervised | Binary (Anomaly) | **0.4929** | **0.9889** | **0.4475** | **0.6162** | **0.8371** | **0.9791** | **34.16 ms** |
-| **Isolation Forest** | Unsupervised | Binary (Anomaly) | **0.1709** | **0.9449** | **0.0941** | **0.1711** | **0.7269** | **0.9470** | **3.87 ms** |
+### Đoạn phương pháp — Normal (paste Word)
 
-- **Random Forest bổ sung:** Out-of-Bag (OOB) Score = **0.9050** (chứng minh khả năng khái quát hóa vượt trội trên tập train).
-- **Isolation Forest:** Thử nghiệm toàn diện với 4 mức contamination (`0.001`, `0.005`, `0.01`, `0.05`) đều cho kết quả F1 thấp $\rightarrow$ chứng minh luận điểm **"ranh giới không gian đặc trưng không có outlier rõ rệt, không phải lỗi do thuật toán"**.
+> Tập Normal không sinh ngẫu nhiên. Dữ liệu thu từ 9 phiên Mininet độc lập (`run_id` riêng): ICMP (ping), TCP (iperf/HTTP), UDP (iperf), đi qua switch OpenFlow 1.3, os-ken ghi flow stats mỗi 5 giây. Nhóm không dùng bộ sinh 20.000 dòng đã thử rồi loại.
+
+**Cấm viết:** 231.314 mẫu; Normal 20k HTTP/DNS/SSH; `flow_stats.csv` 155k là nmap thật.
 
 ---
 
-## 📝 PHẦN B: HƯỚNG DẪN SỬA CHI TIẾT FILE `KhoaLuanTotNghiep.docx`
+## 2. Bảng 4 model — DUY NHẤT được chiếu là Kết quả
 
-### 1. Cập nhật các đoạn văn bản (Paragraphs):
-- **Đoạn P157 - P160 (Chương 2):** Sửa số lượng mẫu từ 11.283 lên **231.314 mẫu** (166.812 Portscan, 43.612 DDoS, 20.890 Normal).
-- **Đoạn P360 - P376 (Chương 3 & 4):** Cập nhật kết quả của Autoencoder và Isolation Forest. Bổ sung diễn giải về **ROC-AUC (83.71% / 72.69%)** và **PR-AUC (97.91% / 94.70%)** thay vì chỉ dùng Accuracy.
-- **Đoạn P392 - P408:** Xóa phần phân trần về *"DDoS chỉ có 6 mẫu"* vì hiện tại dữ liệu đã có **43.612 mẫu DDoS thực nghiệm từ 24 runs độc lập**.
+Nguồn: `reports/binary_realtime_loso_summary.csv`
 
-### 2. Cập nhật các Bảng biểu (Tables):
-- **Bảng 3, Bảng 4:** Thay bằng kết quả chi tiết của **XGBoost** (Accuracy 80.47%, F1 82.85%, ROC-AUC 92.52%). File số liệu chi tiết: `reports/xgboost_classification_report.csv`.
-- **Bảng 5, Bảng 6:** Thay bằng kết quả chi tiết của **Autoencoder** (Precision 98.89%, Recall 44.75%, ROC-AUC 83.71%, PR-AUC 97.91%).
-- **Bảng 7:** Thay bằng kết quả chi tiết của **Isolation Forest** (Precision 94.49%, Recall 9.41%, ROC-AUC 72.69%, PR-AUC 94.70%).
-- **Bảng 8, Bảng 9:** Thay bằng kết quả chi tiết của **Random Forest** (Accuracy 79.42%, F1 81.76%, ROC-AUC 92.74%, OOB 0.9050). File số liệu: `reports/random_forest_classification_report.csv`.
-- **Bảng 10:** Cập nhật bảng độ trễ suy luận: XGBoost: **0.39 ms**, Random Forest: **15.84 ms**, Isolation Forest: **3.87 ms**, Autoencoder: **34.16 ms**.
-- **Bảng 11:** Cập nhật bảng so sánh 4 mô hình như mục 2 ở trên.
-- **Bảng 12 (Real-only):** Xóa hoặc gộp chung vào bảng kết quả chính, vì toàn bộ dataset hiện tại 99.83% là dữ liệu thực nghiệm thật trong Mininet.
-- **Bảng 15:** Cập nhật bảng phân bố nhãn dataset theo mục 1 ở trên.
+Cùng bài: **Normal vs Attack** · LOSO 19 scenario · 3 poll đầu/5-tuple · 8 feature **bỏ `tp_src`/`tp_dst`** · không SMOTE.
 
-### 3. Cập nhật & Chèn Hình ảnh mới vào Word:
-- Thay hình Ma trận nhầm lẫn bằng các file mới trong thư mục `reports/`:
-  - `reports/confusion_matrix_xgboost.png`
-  - `reports/confusion_matrix_random_forest.png`
-  - `reports/confusion_matrix_autoencoder.png`
-  - `reports/confusion_matrix_isolation_forest.png`
-- Thay hình So sánh mô hình bằng: `reports/model_comparison_chart.png`.
-- **Chèn thêm 2 hình phân tích không gian đặc trưng cực kỳ giá trị:**
-  - **Hình PCA 2D:** `reports/pca_2d_visualization.png`
-  - **Hình t-SNE 2D:** `reports/tsne_2d_visualization.png`
-  - *Ý nghĩa khoa học:* Chứng minh trực quan bằng đồ thị rằng lưu lượng Normal và Attack chồng lấn trong không gian 2D, giải thích cặn kẽ tại sao Unsupervised (Autoencoder/IF) gặp khó khăn trong khi Supervised (XGBoost/RF) vẫn phân tách xuất sắc.
+| Model | Acc pooled | F1 anomaly | P anomaly | R anomaly | Recall theo scenario tấn công | Normal FPR |
+|-------|------------|------------|-----------|-----------|-------------------------------|------------|
+| **XGBoost** | 0,9191 | 0,9544 | 0,9832 | 0,9274 | **0,9074** (min **0,1342**) | **0,2469** |
+| Random Forest | 0,8866 | 0,9349 | 0,9842 | 0,8902 | **0,8619** (min **0**) | **0,1915** |
+| Autoencoder | 0,0831 | 0,0074 | 0,3504 | 0,0037 | 0,1022 (min 0) | 0,0999 |
+| Isolation Forest | 0,0813 | 0,0005 | 0,0426 | 0,0002 | 0,0707 (min 0) | 0,1014 |
+
+### Đoạn bắt buộc dưới bảng (paste Word)
+
+> Acc/F1 pooled không đứng một mình vì số dòng tấn công chiếm đa số. XGBoost/Random Forest vẫn bỏ sót ít nhất một kịch bản nmap (`portscan_nmap_h4_h1`: XGB 0,134 · RF 0). Tỷ lệ báo động nhầm trên snapshot Normal khoảng 19–25%. Autoencoder và Isolation Forest thất bại trên lab này và chỉ giữ làm baseline nhị phân. Accuracy 0,9999 của random-flow split phản ánh rò rỉ cùng 5-tuple khi poll 5 giây, không dùng để suy rộng.
+
+Deploy realtime vẫn XGBoost prototype (latency ~0,44 ms). Candidate 8-feature **không** bật DROP vì FPR Normal.
 
 ---
 
-## 📽️ PHẦN C: HƯỚNG DẪN SỬA SLIDES THUYẾT TRÌNH (`slides-kltn.pdf`)
+## 3. Phụ lục — được phép một đoạn, không phải slide Kết quả
 
-| Slide | Tiêu đề Slide | Nội dung & Số liệu cần sửa | Hình ảnh cần chèn |
-| :---: | :--- | :--- | :--- |
-| **Slide 10** | **DATASET & FEATURE ENGINEERING** | - Tổng số mẫu: **231.314 samples**<br>- Portscan: **166.812** (72.1%)<br>- DDoS: **43.612** (18.9%)<br>- Normal: **20.890** (9.0%)<br>- Train: 185.051 (SMOTE: 400.347) \| Test: 46.263 | Chèn biểu đồ tròn phân phối Dataset |
-| **Slide 12** | **KẾT QUẢ PHÂN LOẠI** | Cập nhật bảng so sánh 4 mô hình mới:<br>- **XGBoost:** F1: 82.85%, ROC-AUC: **92.52%**, Latency: **0.39 ms** (Được chọn cho Realtime)<br>- **Random Forest:** F1: 81.76%, ROC-AUC: **92.74%**, OOB: **0.9050**<br>- **Autoencoder:** PR-AUC: **97.91%**, ROC-AUC: 83.71%<br>- **Isolation Forest:** PR-AUC: 94.70%, ROC-AUC: 72.69% | Chèn hình: `reports/model_comparison_chart.png` |
-| **Slide 13** | **PHÂN TÍCH LỖI & ĐÁNH GIÁ KHÁCH QUAN** | - Thay thế số liệu cũ bằng phân tích: Unsupervised có độ nhạy cao với ngưỡng threshold nhưng FPR cao do không gian đặc trưng không có outlier tách biệt.<br>- Supervised đạt độ phủ (Recall) vượt trội > 90% cho các cuộc tấn công DDoS và Portscan. | Chèn hình Ma trận nhầm lẫn XGBoost & Random Forest |
-| **Slide 14** | **PHÂN TÍCH KHÔNG GIAN ĐẶC TRƯNG (PCA & t-SNE)** | *(Đổi tên từ Real-only Validation thành Phân tích không gian đặc trưng)*<br>- Giải thích hiện tượng chồng lấn dữ liệu giữa Normal và Attack.<br>- Khẳng định tính đầy đủ và quy mô của 24 runs thực nghiệm Mininet độc lập. | Chèn hình: `reports/pca_2d_visualization.png` và `reports/tsne_2d_visualization.png` |
-| **Slide 16** | **REAL-TIME DETECTION & AUTO-MITIGATION** | - Độ trễ suy luận AI: **0.39 ms / sample**.<br>- Chu kỳ giám sát Polling: **5.0 s**.<br>- Cơ chế phòng vệ tự động: Đẩy luật OpenFlow DROP Rule (Priority 65535, Timeout 60s) ngay khi đạt ngưỡng vi phạm (Alert Threshold = 3). | Chèn Screenshot giao diện Dashboard SOC Realtime |
+### 3a. Random-flow (leakage)
+
+`reports/model_comparison.csv` — chỉ giải thích “lab dễ tách + latency”.
+
+| Model | Acc | F1 | Latency |
+|-------|-----|-----|---------|
+| XGBoost | 0,9999 | 0,9999 | ~0,44 ms |
+| Random Forest | 0,9997 | 0,9995 | ~26 ms |
+| Autoencoder | 0,9867 | 0,9918 (anom) | ~34 ms |
+| Isolation Forest | 0,1878 | 0,0008 | ~4 ms |
+
+> Số này không phải generalization.
+
+### 3b. Grouped-by-run (còn overlap scenario)
+
+RF Acc 0,987 ± 0,008 · XGB 0,982 ± 0,017. Ghi rõ cùng `scenario_id` có thể nằm cả train và test.
+
+### 3c. Public (không train controller)
+
+- CICIDS2017 3-class: 880.176 · XGB/RF F1-macro ≈ 0,999 — không phải OpenFlow 5s.
+- InSDN binary: 343.889 · XGB/RF F1 ≈ 0,999 — chỉ 2 lớp.
 
 ---
 
-## 📌 PHẦN D: CÁC FILE BÁO CÁO CSV ĐÃ XUẤT SẴN (CHỈ CẦN MỞ RA COPY)
+## 4. Checklist sửa Word (làm lần lượt)
 
-1. `reports/model_comparison.csv` (Bảng so sánh 4 mô hình tổng thể)
-2. `reports/xgboost_metrics.csv` & `reports/xgboost_classification_report.csv`
-3. `reports/random_forest_metrics.csv` & `reports/random_forest_classification_report.csv`
-4. `reports/autoencoder_metrics.csv` & `reports/autoencoder_threshold_sweep.csv`
-5. `reports/isolation_forest_metrics.csv` & `reports/isolation_forest_contamination_sweep.csv`
+1. Chương dataset: 79.114 **snapshot** / 23.843 5-tuple / 19 scenario / 32 run. Giữ 11.283 lịch sử.
+2. Không xóa câu “DDoS từng chỉ 6 mẫu thật”.
+3. Thay bảng 4 model bằng **mục 2**. Xóa Acc 0,9999 / AE 0,98 khỏi bảng chính.
+4. Thêm đoạn hạn chế: Mininet 1 topo; không mixed traffic; sót 1 kịch bản nmap; FPR Normal 19–25%; AE/IF fail; chưa production.
+5. Realtime: poll 5s · 3 polling reply / nguồn · DROP `hard_timeout` **120s** (không viết 60s).
+6. PCA/t-SNE: lab tách lớp → giải thích Acc random cao. Không bịa “chồng lấn mạnh”.
+7. 3 lớp: một đoạn “phát hiện binary ổn hơn phân loại DDoS vs Portscan khi bỏ cổng thô”.
+8. Không viết zero-day, không viết IDS tổng quát.
+
+---
+
+## 5. Checklist slides
+
+| Slide | Đúng | Sai |
+|-------|------|-----|
+| Dataset | 79.114 snapshot 5s · 23.843 5-tuple · 19 scenario · 32 run | “79k phiên” / 231k |
+| Kết quả | Bảng mục 2 + min recall + FPR | Acc 0,9999 / “4 model đều tốt” |
+| Hạn chế | Mininet · FPR 0,25 · sót nmap · AE/IF ~0,08 | Production / zero-day |
+| Realtime | Prototype XGB · poll 5s · DROP 120s | Candidate robust đã bật |
+| Phụ lục | 0,9999 = leakage | Acc 1,000 tuyệt đối |
+
+---
+
+## 6. File số liệu
+
+- **Chính:** `reports/binary_realtime_loso_summary.csv` · `binary_realtime_loso_per_scenario.csv`
+- Trung gian: `reports/grouped_real_only_summary.csv` · `scenario_held_out_summary.csv`
+- Phụ lục: `reports/model_comparison.csv`
+- Quay video: `HUONG_DAN_QUAY_VIDEO_DEMO.md`

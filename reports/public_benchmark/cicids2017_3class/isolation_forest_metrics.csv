@@ -1,0 +1,2 @@
+Model,Approach,Classification,MetricScope,Accuracy,Precision,Recall,F1-Score,Train_Time_sec,Predict_Test_sec,Inference_ms_per_sample
+Isolation Forest,Unsupervised,Binary,anomaly_class_binary,0.7223976913813084,0.16723078851698633,0.030625129135195942,0.05176963675877057,2.111917700036429,2.43236849992536,12.478301199967973

@@ -23,3 +23,20 @@ HUONG_DAN_THIEN.md
 read_docx.py
 test_setup.sh
 KhoaLuanTotNghiep.docx
+dist/
+dataset/public_benchmark/
+models/public_benchmark/
+
+
+# Thesis / doc tooling junk
+pipeline_run_output*.txt
+WORD_FIX*.md
+WORD_EDIT*.md
+DOCX_CHANGES.txt
+PHAN_VIEC_THIEN.md
+_docx_*.txt
+_*.txt
+~$*.docx
+*.backup.docx
+khoaluan1.pdf
+_extract_docx.py

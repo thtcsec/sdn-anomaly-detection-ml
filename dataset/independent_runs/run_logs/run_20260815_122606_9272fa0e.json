@@ -1,0 +1,18 @@
+{
+  "run_id": "run_20260815_122606_9272fa0e",
+  "scenario_id": "ddos_syn_single_h4_h1",
+  "capture_session_id": "session_20260815_122558",
+  "topology_id": "custom_topo_2s6h_v1",
+  "start_time": "2026-08-15 12:26:06",
+  "end_time": "2026-08-15 12:26:36",
+  "commands": [
+    [
+      "h4",
+      "timeout 25 hping3 -S -i u2000 -p 80 10.0.0.1 &"
+    ]
+  ],
+  "n_flows_exported": 4193,
+  "flow_stats_rows_before": 16256,
+  "flow_stats_rows_after": 22275,
+  "allow_flood": false
+}

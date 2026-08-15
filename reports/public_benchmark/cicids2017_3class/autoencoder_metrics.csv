@@ -1,0 +1,2 @@
+Model,Approach,Classification,MetricScope,Accuracy,Precision,Recall,F1-Score,Train_Time_sec,Predict_Test_sec,Inference_ms_per_sample,Threshold
+Autoencoder,Unsupervised,Binary,anomaly_class_binary,0.7508861823717876,0.4886398763523957,0.14515943892192198,0.22382697038885643,10.713913600076921,10.70797109999694,76.30663020000793,0.016499586582482927

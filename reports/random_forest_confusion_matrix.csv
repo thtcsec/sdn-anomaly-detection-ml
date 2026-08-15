@@ -1,0 +1,4 @@
+,ddos,normal,portscan
+ddos,8680,0,42
+normal,1,4173,4
+portscan,9188,287,23888

@@ -1,0 +1,2 @@
+Model,Approach,Classification,Accuracy,Precision_macro,Recall_macro,F1_macro,F1_weighted,AUC_macro,Train_Time_sec,Predict_Test_sec,Inference_ms_per_sample,Best_Iteration
+XGBoost,Supervised,Multiclass,0.8047467738797743,0.8188686699187775,0.9072741385333886,0.8285235256981253,0.821767829929433,0.9251577581673303,5.903718899935484,0.05296780006028712,0.4369862999301404,199

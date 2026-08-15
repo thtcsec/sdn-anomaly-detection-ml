@@ -1,0 +1,23 @@
+{
+  "dataset": "insdn_binary",
+  "rows_train": 275111,
+  "rows_test": 68778,
+  "labels": "0=normal, 1=anomaly",
+  "note": "SDN-domain public supplementary only. Binary mirror. Not controller train.",
+  "results": [
+    {
+      "model": "xgboost",
+      "accuracy": 0.9986,
+      "precision": 0.9987,
+      "recall": 0.9995,
+      "f1": 0.9991
+    },
+    {
+      "model": "random_forest",
+      "accuracy": 0.9987,
+      "precision": 0.9988,
+      "recall": 0.9997,
+      "f1": 0.9992
+    }
+  ]
+}

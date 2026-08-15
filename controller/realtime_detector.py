@@ -12,10 +12,20 @@ import numpy as np
 import pandas as pd
 import joblib
 from datetime import datetime
-from collections import defaultdict
+from collections import Counter, defaultdict
 
-FEATURE_COLS = [
+LEGACY_FEATURE_COLS = [
     'ip_proto', 'tp_src', 'tp_dst',
+    'packet_count', 'byte_count', 'duration_sec',
+    'packet_count_per_sec', 'byte_count_per_sec',
+    'packet_size_avg', 'flow_duration',
+]
+
+# Candidate protocol D intentionally excludes raw port values.  It is loaded
+# only when explicitly selected in controller_config.json; the legacy model is
+# unchanged by this code path.
+ROBUST_FEATURE_COLS = [
+    'ip_proto',
     'packet_count', 'byte_count', 'duration_sec',
     'packet_count_per_sec', 'byte_count_per_sec',
     'packet_size_avg', 'flow_duration',
@@ -80,6 +90,7 @@ class RealtimeDetector(app_manager.OSKenApp):
         # Initial config & model load
         self.model = None
         self.scaler = None
+        self.feature_cols = LEGACY_FEATURE_COLS
         self._reload_config(initial=True)
 
         self.monitor_thread = hub.spawn(self._monitor)
@@ -123,16 +134,23 @@ class RealtimeDetector(app_manager.OSKenApp):
         if model_name == 'random_forest':
             m_path = os.path.join(BASE_DIR, 'models', 'random_forest_model.pkl')
             s_path = os.path.join(BASE_DIR, 'models', 'random_forest_scaler.pkl')
+            feature_cols = LEGACY_FEATURE_COLS
+        elif model_name == 'xgboost_robust':
+            m_path = os.path.join(BASE_DIR, 'models', 'xgboost_realtime_robust.pkl')
+            s_path = os.path.join(BASE_DIR, 'models', 'xgboost_realtime_robust_scaler.pkl')
+            feature_cols = ROBUST_FEATURE_COLS
         else:
             model_name = 'xgboost'
             m_path = os.path.join(BASE_DIR, 'models', 'xgboost_model.pkl')
             s_path = os.path.join(BASE_DIR, 'models', 'scaler.pkl')
+            feature_cols = LEGACY_FEATURE_COLS
 
         if os.path.exists(m_path) and os.path.exists(s_path):
             try:
                 self.model = joblib.load(m_path)
                 self.scaler = joblib.load(s_path)
                 self.selected_model_name = model_name
+                self.feature_cols = feature_cols
                 self.logger.info("\033[92m[✓] Active ML Model: %s\033[0m", model_name.upper())
                 self.logger.info("\033[92m[✓] Auto-Mitigation: %s (threshold=%d, timeout=%ds, poll=%.1fs)\033[0m",
                                 "ENABLED" if self.mitigation_enabled else "DISABLED",
@@ -262,6 +280,10 @@ class RealtimeDetector(app_manager.OSKenApp):
         datapath = ev.msg.datapath
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         updated_any = False
+        # A polling reply is the decision round.  We aggregate per source so
+        # "3 consecutive alerts" means three polling rounds, not three flow
+        # entries from the same stats reply.
+        source_poll = defaultdict(list)
 
         for stat in body:
             if 'ipv4_src' not in stat.match or 'ipv4_dst' not in stat.match:
@@ -276,12 +298,21 @@ class RealtimeDetector(app_manager.OSKenApp):
             byte_per_sec = stat.byte_count / duration if duration > 0 else 0
             pkt_size_avg = stat.byte_count / stat.packet_count if stat.packet_count > 0 else 0
 
-            # DataFrame với đúng tên cột lúc fit scaler → tránh warning feature names
-            features = pd.DataFrame([[
-                ip_proto, tp_src, tp_dst,
-                stat.packet_count, stat.byte_count, stat.duration_sec,
-                pkt_per_sec, byte_per_sec, pkt_size_avg, duration
-            ]], columns=FEATURE_COLS)
+            feature_values = {
+                'ip_proto': ip_proto,
+                'tp_src': tp_src,
+                'tp_dst': tp_dst,
+                'packet_count': stat.packet_count,
+                'byte_count': stat.byte_count,
+                'duration_sec': stat.duration_sec,
+                'packet_count_per_sec': pkt_per_sec,
+                'byte_count_per_sec': byte_per_sec,
+                'packet_size_avg': pkt_size_avg,
+                'flow_duration': duration,
+            }
+            # Keep names and ordering from the fitted candidate/legacy scaler.
+            features = pd.DataFrame([[feature_values[c] for c in self.feature_cols]],
+                                    columns=self.feature_cols)
 
             t0 = time.perf_counter()
             features_scaled = self.scaler.transform(features)
@@ -303,6 +334,16 @@ class RealtimeDetector(app_manager.OSKenApp):
             ip_src = stat.match['ipv4_src']
             ip_dst = stat.match['ipv4_dst']
             is_blocked = (ip_src in self.blocked_ips)
+            source_poll[ip_src].append({
+                'label': label,
+                'datapath': datapath,
+                'ip_dst': ip_dst,
+                'tp_dst': int(tp_dst),
+                'ip_proto': int(ip_proto),
+                'packet_count_per_sec': float(pkt_per_sec),
+                'byte_count_per_sec': float(byte_per_sec),
+                'blocked': is_blocked,
+            })
 
             # Record recent flow (kể cả Normal)
             flow_entry = {
@@ -323,37 +364,40 @@ class RealtimeDetector(app_manager.OSKenApp):
             if len(self.recent_flows) > MAX_RECENT_FLOWS:
                 self.recent_flows = self.recent_flows[-MAX_RECENT_FLOWS:]
 
-            # Alert nếu phát hiện tấn công
-            if label != 'NORMAL':
-                self.logger.warning(
-                    "\033[91m⚠️  ALERT [%s] %s -> %s | proto=%d | "
-                    "pkts/s=%.1f | bytes/s=%.1f | prediction=%s (latency=%.3fms)\033[0m",
-                    timestamp, ip_src, ip_dst,
-                    ip_proto, pkt_per_sec, byte_per_sec, label, self.last_inference_latency_ms
-                )
-
-                blocked_now = False
-                # === AUTO-MITIGATION ===
-                if self.mitigation_enabled and ip_src not in self.blocked_ips:
-                    self.alert_counter[ip_src] += 1
-
-                    if self.alert_counter[ip_src] >= self.alert_threshold:
-                        self._block_attacker(datapath, ip_src, label)
-                        blocked_now = True
-
-                self._append_alert({
-                    'timestamp': timestamp,
-                    'ip_src': ip_src,
-                    'ip_dst': ip_dst,
-                    'tp_dst': int(tp_dst),
-                    'ip_proto': int(ip_proto),
-                    'packet_count_per_sec': float(pkt_per_sec),
-                    'byte_count_per_sec': float(byte_per_sec),
-                    'prediction': label,
-                    'blocked': blocked_now or is_blocked,
-                    'flows_analyzed': self.flows_analyzed,
-                    'latency_ms': self.last_inference_latency_ms
-                })
+        # Apply mitigation once per source for this complete polling reply.
+        for ip_src, evidence in source_poll.items():
+            attacks = [item for item in evidence if item['label'] != 'NORMAL']
+            if not attacks:
+                self.alert_counter[ip_src] = 0
+                continue
+            selected = Counter(item['label'] for item in attacks).most_common(1)[0][0]
+            representative = attacks[0]
+            self.logger.warning(
+                "\033[91m⚠️  ALERT [%s] %s -> %s | proto=%d | "
+                "pkts/s=%.1f | bytes/s=%.1f | prediction=%s (source poll)\033[0m",
+                timestamp, ip_src, representative['ip_dst'], representative['ip_proto'],
+                representative['packet_count_per_sec'], representative['byte_count_per_sec'], selected,
+            )
+            blocked_now = False
+            if self.mitigation_enabled and ip_src not in self.blocked_ips:
+                self.alert_counter[ip_src] += 1
+                if self.alert_counter[ip_src] >= self.alert_threshold:
+                    self._block_attacker(representative['datapath'], ip_src, selected)
+                    blocked_now = True
+            self._append_alert({
+                'timestamp': timestamp,
+                'ip_src': ip_src,
+                'ip_dst': representative['ip_dst'],
+                'tp_dst': representative['tp_dst'],
+                'ip_proto': representative['ip_proto'],
+                'packet_count_per_sec': representative['packet_count_per_sec'],
+                'byte_count_per_sec': representative['byte_count_per_sec'],
+                'prediction': selected,
+                'blocked': blocked_now or representative['blocked'],
+                'flows_analyzed': self.flows_analyzed,
+                'latency_ms': self.last_inference_latency_ms,
+                'source_poll_flows': len(evidence),
+            })
 
         if updated_any:
             self._save_live_stats()

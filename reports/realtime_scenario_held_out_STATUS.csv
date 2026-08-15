@@ -1,0 +1,2 @@
+status,protocol,n_clean_poll_rows,n_early_snapshots,n_scenarios,max_polls_per_5tuple,consecutive_source_polls_for_alert,feature_set,smote,controller_model_changed
+ok,LOSO by scenario_id; early flow observations only,79114,50351,19,3,3,"ip_proto,packet_count,byte_count,duration_sec,packet_count_per_sec,byte_count_per_sec,packet_size_avg,flow_duration",False,False

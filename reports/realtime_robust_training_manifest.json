@@ -1,0 +1,28 @@
+[
+  {
+    "purpose":"candidate_only; activate explicitly in controller_config.json",
+    "source":"clean independent Mininet runs only",
+    "n_clean_poll_rows":79114,
+    "n_training_early_snapshots":50351,
+    "n_scenarios":19,
+    "max_polls_per_5tuple":3,
+    "feature_columns":[
+      "ip_proto",
+      "packet_count",
+      "byte_count",
+      "duration_sec",
+      "packet_count_per_sec",
+      "byte_count_per_sec",
+      "packet_size_avg",
+      "flow_duration"
+    ],
+    "label_classes":[
+      "ddos",
+      "normal",
+      "portscan"
+    ],
+    "smote":false,
+    "evaluation":"reports\/realtime_scenario_held_out_summary.csv",
+    "warning":"Do not report training accuracy; use scenario-held-out episode metrics."
+  }
+]

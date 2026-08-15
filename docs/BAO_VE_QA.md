@@ -37,10 +37,12 @@ Mininet (A4 topo 2SW/6H)
 
 ## A3. Dataset & provenance
 
-- ~**11.283** mẫu: Portscan 10.565 · Normal 312 · DDoS 406  
-- DDoS: **6 lab thật** + **400 bootstrap** (`is_synthetic=1`)  
-- Thu chính: `src/collect_data.py` — Normal ping/iperf; DDoS 45s h4/h5/h6; Portscan 3 host  
-- **Không** train chính trên CICIDS/InSDN (InSDN chỉ tham khảo)
+- Bảng luận văn cũ: ~**11.283** mẫu: Portscan 10.565 · Normal 312 · DDoS 406 (trong đó DDoS = **6 lab thật** + **400 bootstrap**)
+- Thu chính ban đầu: `src/collect_data.py` — Normal ping/iperf; DDoS 45s h4/h5/h6; Portscan 3 host
+- **Không lấy `flow_stats.csv` thô sau các phiên thu mới làm số chính** — file này bị monitor append thêm, Portscan phình rất lớn.
+- **Benchmark grouped (lab SDN, `run_id`)**: **20 run** · **55.515** rows: DDoS **43.206** · Portscan **11.731** · Normal **578**
+- Cảnh báo: con số ~38k DDoS lúc đầu là **nhãn cửa sổ thời gian**, dính leftover nmap. Lọc attacker↔target + L4 mới ra số thật.
+- **Benchmark chính trong luận văn** vẫn là lab tự thu; CICIDS2017 (3-class) và InSDN (binary) chỉ là **đối chứng công khai**, không train controller.
 
 ## A4. 10 đặc trưng
 
@@ -85,6 +87,22 @@ Scaler **không** nằm trong `preprocess.py`; nằm trong từng `train_*.py`.
 **Real-only XGB/RF:** Acc holdout **1.0000** nhưng `n_ddos_real=6`.  
 **RF Real-only CV K=5:** Acc ≈ 0.9997±0.0004 · **F1_macro ≈ 0.8994±0.1343**.
 
+**Grouped run-isolated (lab SDN, đúng hướng đề tài):**
+- 20 run độc lập · 55.515 rows known-`run_id` · DDoS 43.206
+- RF: **Acc 0.9981 ± 0.0041 · F1_macro 0.9881 ± 0.0257 · DDoS recall ≈ 1.000**
+- XGB: **Acc 0.8505 ± 0.3339 · F1_macro 0.8756 ± 0.2646 · DDoS recall ≈ 1.000**
+- XGB lệch mạnh vì **fold 4** (test chủ yếu portscan) Acc chỉ **0.25**; RF vẫn ~0.99. Không nói “XGB vững tuyệt đối”.
+
+**Public CICIDS2017 3-class (bổ sung, không phải OpenFlow):**
+- 880.176 flows · Normal 662.383 · DDoS 127.175 · PortScan 90.618
+- XGB Acc 0.9994 · F1_macro 0.9991 · RF Acc 0.9995 · F1_macro 0.9993
+- IF / AE tụt mạnh (F1_anomaly 0.05 / 0.22)
+
+**Public InSDN binary (bổ sung, domain SDN hơn CICIDS, nhưng chỉ 2 lớp):**
+- 343.889 flows · Normal 68.424 · Anomaly 275.465
+- XGB Acc 0.9986 · F1 0.9991 · RF Acc 0.9987 · F1 0.9992
+- Không trộn vào train controller; không gọi đây là 3-class như lab.
+
 ## A8. Ba câu “không được nói sai”
 
 1. Không nói Acc=1.0 = mạng thật / production.  
@@ -126,7 +144,10 @@ Mỗi câu: **Ý trả lời ngắn** → **Câu nói miệng** → **Bẫy / đ
 ### Q4. Dataset lấy ở đâu? Có dùng CICIDS/InSDN không?
 
 **Nói:**  
-> Tự thu trên Mininet. InSDN tham khảo lý thuyết, **không** làm tập train chính. Không dùng CICIDS2017.  
+> Benchmark chính là dữ liệu tự thu trên Mininet/OpenFlow. Em không train controller bằng dataset công khai. Ngoài lab, em có hai đối chứng: **CICIDS2017 3-class (~880k)** và **InSDN binary (~344k, domain SDN hơn)**. InSDN bản em tải được chỉ có nhãn 0/1 nên không thay 3 lớp `normal/ddos/portscan` của đề tài.  
+
+**Nếu muốn trả lời chắc hơn:**  
+> Quan trọng hơn public data, em đã thu thêm run độc lập trong chính lab SDN: **20 `run_id`**, khoảng **43k mẫu DDoS lab** sau khi lọc leftover, rồi đánh giá GroupKFold theo phiên thu. 
 
 ### Q5. Tại sao Portscan áp đảo? Có bias không?
 
@@ -136,7 +157,7 @@ Mỗi câu: **Ý trả lời ngắn** → **Câu nói miệng** → **Bẫy / đ
 ### Q6. DDoS chỉ 6 mẫu thật — có đủ không?
 
 **Nói (thẳng):**  
-> Không đủ để khẳng định generalization. Em bổ sung bootstrap semi-synthetic, đánh dấu `is_synthetic`, báo cáo Full vs Real-only, và nêu hạn chế. Hướng tiếp theo là thu thêm run lab độc lập.  
+> Với bảng cũ thì không đủ — chỉ 6 DDoS lab thật. Em không lấy con số ~38k lúc thu ồ ạt vì đó là nhãn cả cửa sổ, dính flow nmap còn trong bảng OpenFlow. Sau khi lọc attacker↔target và thu thêm flood đa cổng, pool grouped có khoảng **43k DDoS lab** trên **11 run DDoS**. Vẫn tách public CICIDS/InSDN ra, không trộn vào controller. 
 
 ### Q7. Bootstrap / synthetic có phải “bịa số” không?
 
@@ -220,6 +241,12 @@ Mỗi câu: **Ý trả lời ngắn** → **Câu nói miệng** → **Bẫy / đ
 **Nói (thuộc lòng):**  
 > Trên lab Mininet, traffic hping3/nmap tách rất rõ so với ping/iperf trên 10 feature tabular — RF/XGB dễ đạt gần tuyệt đối. Real-only Acc=1.0 trên holdout **không** chứng minh production: chỉ có **6 DDoS thật**. CV 5-fold real-only: Acc vẫn cao nhưng **F1-macro ≈ 0.90 ± 0.13** — một fold sai 1 mẫu DDoS là macro-F1 tụt. Em báo cáo cả hai góc nhìn và chọn **XGB realtime** vì latency thấp hơn (~0.3 vs ~15 ms), không chọn RF dù Acc bảng cao hơn.  
 
+**Nếu bị vặn tiếp:**  
+> Em còn chạy benchmark công khai CICIDS2017 đã map về cùng schema 10 feature. Trên đó RF vẫn đạt **Acc ~0.9995, F1-macro ~0.9993** và XGB đạt **Acc ~0.9994, F1-macro ~0.9991**. Như vậy kết quả không chỉ sống nhờ `6` mẫu DDoS lab, nhưng em vẫn không gọi đó là production vì benchmark công khai này không phải môi trường SDN realtime của bài toán gốc.  
+
+**Nếu hội đồng xoáy đúng hướng SDN:**  
+> Quan trọng hơn public benchmark, em đánh giá grouped theo `run_id` ngay trong lab. RF: **Acc ~0.9981 ± 0.004, F1_macro ~0.988**. XGB trung bình thấp hơn và **lệch fold** (một fold portscan Acc ~0.25) dù DDoS recall vẫn ~1.0. CICIDS/InSDN chỉ đối chứng phụ. 
+
 **Đừng:** “model hoàn hảo” / “chắc chắn bắt mọi DDoS”.
 
 ### Q21. Vậy kết quả có ý nghĩa gì?
@@ -268,14 +295,22 @@ Mỗi câu: **Ý trả lời ngắn** → **Câu nói miệng** → **Bẫy / đ
 ### Q28. Hạn chế chính?
 
 **Nói:**  
-> (1) Chỉ 3 nhãn; (2) Mininet ít nhiễu; (3) DDoS thật ít + bootstrap trước split; (4) Feature cổng mạnh trên lab; (5) Chưa zero-day độc lập / chưa đủ grouped-by-run.  
+> (1) Chỉ 3 nhãn; (2) Mininet ít nhiễu; (3) Bảng cũ DDoS thật ít + bootstrap trước split; (4) CICIDS mirror thiếu `Protocol/Source Port`; (5) InSDN public chỉ binary; (6) XGB grouped vẫn gãy trên fold portscan dù DDoS đã nhiều. 
 
-### Q29. Làm tiếp gì?
+### Q29. Sao không dùng log HUFLIT luôn?
 
 **Nói:**  
-> Thu thêm DDoS/Normal thật theo `run_id`; bootstrap sau split; đánh giá cross-topo; tinh chỉnh mitigation; có thể thử InSDN như thí nghiệm phụ.  
+> Em có audit log FortiGate HUFLIT, nhưng đó là firewall/session log khác modality so với OpenFlow flow statistics của hệ thống hiện tại và chưa có nhãn `normal/ddos/portscan` tương thích trực tiếp. Nếu ép dùng gấp sẽ phải ETL và heuristic labeling khá mạnh, nên em không chọn nó làm benchmark chính ở giai đoạn này.  
 
-### Q30. Đóng góp cá nhân Tú / Thiện?
+### Q30. Làm tiếp gì?
+
+**Nói:**  
+> Thu thêm DDoS/Normal thật theo `run_id`; bootstrap sau split; đánh giá cross-topo; tinh chỉnh mitigation; nếu có thời gian thì làm ETL riêng cho FortiGate HUFLIT như external stress test.  
+
+**Nếu hỏi “ưu tiên cái gì nhất?”**  
+> Em ưu tiên benchmark grouped trong chính lab SDN trước, vì nó đúng đề tài hơn mọi benchmark ngoài.  
+
+### Q31. Đóng góp cá nhân Tú / Thiện?
 
 **Nói theo đúng bảng phân công luận văn** (Tú: lab/controller/demo; Thiện: ML/báo cáo). Không nhận phần của người kia.
 
@@ -283,23 +318,23 @@ Mỗi câu: **Ý trả lời ngắn** → **Câu nói miệng** → **Bẫy / đ
 
 ## B8. Câu “đánh nhanh” kỹ thuật
 
-### Q31. Packet-In là gì?
+### Q32. Packet-In là gì?
 
 > Switch gửi gói/header lên controller khi không khớp flow (hoặc gửi controller theo rule).
 
-### Q32. Flow table saturation?
+### Q33. Flow table saturation?
 
 > Bảng flow đầy → flow hợp lệ khó cài. Em **mô phỏng flood tải cao**; không đo occupancy chi tiết trừ khi có số liệu — tránh claim quá mạnh.
 
-### Q33. Supervised vs unsupervised khi nào?
+### Q34. Supervised vs unsupervised khi nào?
 
 > Có nhãn rõ, kiểu tấn công biết trước → XGB/RF. Í thường sạch, cần cờ anomaly / biến thể → IF/AE. Hệ thống thực tế có thể xếp tầng.
 
-### Q34. Vì sao không Deep Learning phức tạp hơn?
+### Q35. Vì sao không Deep Learning phức tạp hơn?
 
 > 10 feature tabular; XGB/RF đã rất mạnh; AE đủ minh họa DL; latency/control plane ưu tiên mô hình nhẹ.
 
-### Q35. Stratify / SMOTE / contamination / hard_timeout?
+### Q36. Stratify / SMOTE / contamination / hard_timeout?
 
 > Stratify: giữ tỷ lệ lớp khi split. SMOTE: oversample train. Contamination: tỷ lệ outlier giả định IF. hard_timeout: rule tự hết hạn.
 
@@ -308,13 +343,13 @@ Mỗi câu: **Ý trả lời ngắn** → **Câu nói miệng** → **Bẫy / đ
 # C. CHEAT SHEET 60 GIÂY (trước vào phòng)
 
 1. Làm **hệ thống SDN+ML khép kín**, không invent algo.  
-2. Data **tự thu** Mininet; DDoS thật **6** + bootstrap; có provenance.  
+2. Data **tự thu** Mininet; bảng cũ 6 DDoS + bootstrap; grouped mới ~**43k DDoS / 20 run**; CICIDS/InSDN chỉ đối chứng.  
 3. SMOTE **train only** trong `preprocess.py`.  
 4. RF Acc=1.0 = **lab dễ tách**, không = production; xem CV F1-macro.  
 5. Deploy **XGB** vì **latency**.  
 6. Realtime = **`realtime_detector.py`**; monitor = thu CSV.  
 7. AE threshold **0.0473** trên Normal-train.  
-8. Hạn chế: dữ liệu mỏng, Mininet, bootstrap trước split.  
+8. Hạn chế: Mininet; bootstrap trước split; XGB grouped gãy fold portscan; public ≠ OpenFlow.  
 
 ---
 
@@ -324,7 +359,7 @@ Mỗi câu: **Ý trả lời ngắn** → **Câu nói miệng** → **Bẫy / đ
 |-----|----------------|
 | Đồ chơi Mininet thôi à? | Đúng là testbed giả lập; giá trị nằm ở pipeline + realtime có kiểm soát, em không claim production. |
 | 100% là gian lận? | Không — lab tách lớp + mẫu DDoS thật ít; em đã disclose và đưa CV F1 thấp hơn. |
-| Sao không dataset chuẩn? | Scope là self-collected OpenFlow trên os-ken; InSDN chỉ tham khảo. |
+| Sao không dataset chuẩn? | Scope là OpenFlow tự thu; CICIDS ~880k và InSDN ~344k chỉ đối chứng, không train controller. |
 | Block nhầm user thì sao? | Có rủi ro FP; threshold 3 + timeout 120s; mạng thật cần tinh chỉnh thêm. |
 | Em hay Thiện code phần này? | Trả lời đúng phân công — không nhận bừa. |
 

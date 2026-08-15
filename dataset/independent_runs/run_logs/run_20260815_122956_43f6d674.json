@@ -1,0 +1,18 @@
+{
+  "run_id": "run_20260815_122956_43f6d674",
+  "scenario_id": "ddos_udp_h5_h1",
+  "capture_session_id": "session_20260815_122805",
+  "topology_id": "custom_topo_2s6h_v1",
+  "start_time": "2026-08-15 12:29:56",
+  "end_time": "2026-08-15 12:30:26",
+  "commands": [
+    [
+      "h5",
+      "timeout 25 hping3 --udp -i u2000 -p 53 10.0.0.1 &"
+    ]
+  ],
+  "n_flows_exported": 4669,
+  "flow_stats_rows_before": 51886,
+  "flow_stats_rows_after": 57487,
+  "allow_flood": false
+}

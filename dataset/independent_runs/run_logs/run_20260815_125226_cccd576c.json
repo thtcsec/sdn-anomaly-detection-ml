@@ -1,0 +1,22 @@
+{
+  "run_id": "run_20260815_125226_cccd576c",
+  "scenario_id": "ddos_syn_multiport_multi_h4h6_h1h3",
+  "capture_session_id": "session_20260815_125036",
+  "topology_id": "custom_topo_2s6h_v1",
+  "start_time": "2026-08-15 12:52:26",
+  "end_time": "2026-08-15 12:53:02",
+  "commands": [
+    [
+      "h4",
+      "timeout 30 hping3 -S -i u2000 -p ++80 10.0.0.1 &"
+    ],
+    [
+      "h6",
+      "timeout 30 hping3 -S -i u2000 -p ++443 10.0.0.3 &"
+    ]
+  ],
+  "n_flows_exported": 0,
+  "flow_stats_rows_before": 118831,
+  "flow_stats_rows_after": 124695,
+  "allow_flood": false
+}

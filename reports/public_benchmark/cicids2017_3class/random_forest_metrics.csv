@@ -1,0 +1,2 @@
+Model,Approach,Classification,MetricScope,Accuracy,Precision,Recall,F1-Score,Train_Time_sec,Predict_Test_sec,Inference_ms_per_sample
+Random Forest,Supervised,Multiclass,macro_multiclass,0.999539866845418,0.9992987451391814,0.9992879766846552,0.9992932777124456,19.112306999973953,0.33334400004241616,54.76825750002172

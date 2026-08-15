@@ -135,7 +135,77 @@ def _scenarios(allow_flood: bool) -> list[dict[str, Any]]:
             ],
             'kill': 'hping3',
         },
+        {
+            'scenario_id': 'ddos_syn_multiport_h4_h1',
+            'attack_protocol': 'tcp_syn',
+            'attack_rate': 'flood' if allow_flood else DEFAULT_INTERVAL,
+            'attacker_count': 1,
+            'target_host': '10.0.0.1',
+            'duration_sec': 30,
+            'commands': [
+                ('h4', f'timeout 30 hping3 -S {flood} -p ++80 10.0.0.1 &'),
+            ],
+            'kill': 'hping3',
+        },
+        {
+            'scenario_id': 'ddos_udp_multiport_h5_h2',
+            'attack_protocol': 'udp',
+            'attack_rate': 'flood' if allow_flood else DEFAULT_INTERVAL,
+            'attacker_count': 1,
+            'target_host': '10.0.0.2',
+            'duration_sec': 30,
+            'commands': [
+                ('h5', f'timeout 30 hping3 --udp {flood} -p ++53 10.0.0.2 &'),
+            ],
+            'kill': 'hping3',
+        },
+        {
+            'scenario_id': 'ddos_syn_multiport_multi_h4h6_h1h3',
+            'attack_protocol': 'tcp_syn',
+            'attack_rate': 'flood' if allow_flood else DEFAULT_INTERVAL,
+            'attacker_count': 2,
+            'target_host': '10.0.0.1;10.0.0.3',
+            'duration_sec': 30,
+            'commands': [
+                ('h4', f'timeout 30 hping3 -S {flood} -p ++80 10.0.0.1 &'),
+                ('h6', f'timeout 30 hping3 -S {flood} -p ++443 10.0.0.3 &'),
+            ],
+            'kill': 'hping3',
+        },
     ]
+
+
+ATTACKERS = {'10.0.0.4', '10.0.0.5', '10.0.0.6'}
+
+
+def filter_ddos_related(part, targets: set[str], require_packets: bool = False):
+    """Keep L4 flows between attackers and scenario targets, either direction.
+
+    Multiport hping3 creates one 5-tuple per packet, so OpenFlow often records
+    packet_count=0 (the only packet was handled as packet-in). Do not drop
+    those unless leftover-scan cleaning is explicitly requested.
+    """
+    import pandas as pd
+
+    if part is None or part.empty:
+        return part
+    if 'ip_src' in part.columns and 'ip_dst' in part.columns:
+        src = part['ip_src'].astype(str)
+        dst = part['ip_dst'].astype(str)
+        related = (
+            (src.isin(ATTACKERS) & dst.isin(targets))
+            | (src.isin(targets) & dst.isin(ATTACKERS))
+        )
+        part = part[related].copy()
+    if 'tp_src' in part.columns and 'tp_dst' in part.columns:
+        l4 = (
+            (pd.to_numeric(part['tp_src'], errors='coerce').fillna(0) != 0)
+            | (pd.to_numeric(part['tp_dst'], errors='coerce').fillna(0) != 0)
+        )
+        part = part[l4].copy()
+    if require_packets and 'packet_count' in part.columns:
+        part = part[pd.to_numeric(part['packet_count'], errors='coerce').fillna(0) > 0].copy()
+    return part
 
 
 def _extract_targets(scenario: dict[str, Any]) -> list[str]:
@@ -201,6 +271,11 @@ def _export_window_to_run_csv(
         # fallback: take newest rows since start of scenario if clock skew
         part = df.tail(0).copy()
 
+    # Giữ flow L4 liên quan attacker <-> target.
+    # Learning-switch có thể ghi chiều ngược (RST victim -> attacker);
+    # rule ARP không có eth_type từng nuốt SYN nên chiều xuôi có thể trống.
+    part = filter_ddos_related(part, set(_extract_targets(scenario)))
+
     # Label as ddos for this collection script (DDoS-focused)
     part['label'] = 'ddos'
     part['is_synthetic'] = 0
@@ -225,9 +300,11 @@ def run_collection(dry_run: bool, allow_flood: bool, only: str | None) -> None:
     _init_dirs()
     scenarios = _scenarios(allow_flood=allow_flood)
     if only:
-        scenarios = [s for s in scenarios if s['scenario_id'] == only]
-        if not scenarios:
-            raise SystemExit(f'Unknown scenario_id={only}')
+        wanted = [x.strip() for x in only.split(',') if x.strip()]
+        scenarios = [s for s in scenarios if s['scenario_id'] in wanted]
+        missing = [x for x in wanted if x not in {s['scenario_id'] for s in scenarios}]
+        if missing:
+            raise SystemExit(f'Unknown scenario_id={missing}')
 
     # Validate all targets up front
     for sc in scenarios:
@@ -315,10 +392,11 @@ def run_collection(dry_run: bool, allow_flood: bool, only: str | None) -> None:
         for h in hosts.values():
             h.cmd(f"killall {sc['kill']} 2>/dev/null")
         time.sleep(2)
-        end = _now()
 
-        # Allow controller to flush a couple monitor intervals
+        # Allow controller to flush a couple monitor intervals BEFORE closing
+        # the export window — otherwise new rows fall after `end`.
         time.sleep(8)
+        end = _now()
         n_flows = _export_window_to_run_csv(
             run_id, sc, capture_session_id, start, end
         )

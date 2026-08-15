@@ -15,14 +15,17 @@ from sklearn.model_selection import train_test_split
 # Paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATASET_DIR = os.path.join(BASE_DIR, 'dataset')
-RAW_CSV = os.path.join(DATASET_DIR, 'flow_stats.csv')
+GROUPED_CSV = os.path.join(DATASET_DIR, 'flow_stats_grouped.csv')
+RAW_CSV = GROUPED_CSV if os.path.exists(GROUPED_CSV) else os.path.join(DATASET_DIR, 'flow_stats.csv')
 PROCESSED_CSV = os.path.join(DATASET_DIR, 'processed_data.csv')
 TRAIN_CSV = os.path.join(DATASET_DIR, 'train.csv')
 TEST_CSV = os.path.join(DATASET_DIR, 'test.csv')
 
 
-def load_data(filepath=RAW_CSV):
+def load_data(filepath=None):
     """Load raw CSV data."""
+    if filepath is None:
+        filepath = RAW_CSV
     if not os.path.exists(filepath):
         print(f"[!] File not found: {filepath}")
         sys.exit(1)

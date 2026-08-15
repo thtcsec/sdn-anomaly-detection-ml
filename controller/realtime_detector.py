@@ -7,6 +7,7 @@ Chạy: python controller/run_realtime.py
 """
 
 import os
+import time
 import numpy as np
 import pandas as pd
 import joblib
@@ -34,16 +35,21 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODEL_PATH = os.path.join(BASE_DIR, 'models', 'xgboost_model.pkl')
 SCALER_PATH = os.path.join(BASE_DIR, 'models', 'scaler.pkl')
 ALERT_LOG = os.path.join(BASE_DIR, 'dataset', 'alerts.json')
-MAX_ALERTS = 500
+LIVE_STATS_LOG = os.path.join(BASE_DIR, 'dataset', 'live_stats.json')
+CONFIG_PATH = os.path.join(BASE_DIR, 'dataset', 'controller_config.json')
 
-MONITOR_INTERVAL = 5
+MAX_ALERTS = 500
+MAX_RECENT_FLOWS = 50
+BLOCK_PRIORITY = 100
 LABEL_MAP = {0: 'DDOS', 1: 'NORMAL', 2: 'PORTSCAN'}
 
-# === AUTO-MITIGATION CONFIG ===
-MITIGATION_ENABLED = True          # Bật/tắt auto-block
-ALERT_THRESHOLD = 3                # Số lần detect liên tiếp trước khi block
-BLOCK_TIMEOUT = 120                # Thời gian block IP (giây), sau đó tự mở
-BLOCK_PRIORITY = 100               # Priority cao để override flow rules khác
+DEFAULT_CONFIG = {
+    'polling_interval': 5.0,
+    'alert_threshold': 3,
+    'block_timeout': 120,
+    'mitigation_enabled': True,
+    'selected_model': 'xgboost'
+}
 
 
 class RealtimeDetector(app_manager.OSKenApp):
@@ -54,36 +60,94 @@ class RealtimeDetector(app_manager.OSKenApp):
         super(RealtimeDetector, self).__init__(*args, **kwargs)
         self.mac_to_port = {}
         self.datapaths = {}
-        self.monitor_thread = hub.spawn(self._monitor)
 
-        # Mitigation state
+        # Mitigation & Dynamic Config State
+        self.monitor_interval = 5.0
+        self.alert_threshold = 3
+        self.block_timeout = 120
+        self.mitigation_enabled = True
+        self.selected_model_name = 'xgboost'
+
         self.alert_counter = defaultdict(int)  # IP → số lần bị detect
         self.blocked_ips = set()               # Danh sách IP đã bị block
         self.flows_analyzed = 0
+        self.normal_count = 0
+        self.ddos_count = 0
+        self.portscan_count = 0
+        self.recent_flows = []
+        self.last_inference_latency_ms = 0.32
 
-        # Load model
-        if os.path.exists(MODEL_PATH) and os.path.exists(SCALER_PATH):
-            self.model = joblib.load(MODEL_PATH)
-            self.scaler = joblib.load(SCALER_PATH)
-            self.logger.info("\033[92m[✓] Loaded XGBoost model successfully\033[0m")
-            self.logger.info("\033[92m[✓] Auto-Mitigation: %s (threshold=%d, timeout=%ds)\033[0m",
-                            "ENABLED" if MITIGATION_ENABLED else "DISABLED",
-                            ALERT_THRESHOLD, BLOCK_TIMEOUT)
-        else:
-            self.model = None
-            self.scaler = None
-            self.logger.warning("[!] Model not found! Run train_model.py first.")
+        # Initial config & model load
+        self.model = None
+        self.scaler = None
+        self._reload_config(initial=True)
 
-        # Reset alert log khi start controller (tránh log cũ lẫn session mới)
+        self.monitor_thread = hub.spawn(self._monitor)
+
+        # Reset alert log & live stats khi start controller
         os.makedirs(os.path.dirname(ALERT_LOG), exist_ok=True)
         with open(ALERT_LOG, 'w', encoding='utf-8') as f:
             json.dump([], f)
+        self._save_live_stats()
+
+    def _reload_config(self, initial=False):
+        """Đọc dynamic config từ dataset/controller_config.json nếu có."""
+        cfg = dict(DEFAULT_CONFIG)
+        if os.path.exists(CONFIG_PATH):
+            try:
+                with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+                    saved = json.load(f)
+                    if isinstance(saved, dict):
+                        cfg.update(saved)
+            except Exception:
+                pass
+        else:
+            try:
+                os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+                with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
+                    json.dump(cfg, f, indent=2)
+            except Exception:
+                pass
+
+        self.monitor_interval = max(1.0, min(30.0, float(cfg.get('polling_interval', 5.0))))
+        self.alert_threshold = max(1, min(20, int(cfg.get('alert_threshold', 3))))
+        self.block_timeout = max(10, min(1200, int(cfg.get('block_timeout', 120))))
+        self.mitigation_enabled = bool(cfg.get('mitigation_enabled', True))
+
+        target_model = str(cfg.get('selected_model', 'xgboost')).lower()
+        if initial or target_model != self.selected_model_name or self.model is None:
+            self._switch_model(target_model)
+
+    def _switch_model(self, model_name):
+        """Nạp model ML tương ứng (XGBoost hoặc Random Forest)."""
+        if model_name == 'random_forest':
+            m_path = os.path.join(BASE_DIR, 'models', 'random_forest_model.pkl')
+            s_path = os.path.join(BASE_DIR, 'models', 'random_forest_scaler.pkl')
+        else:
+            model_name = 'xgboost'
+            m_path = os.path.join(BASE_DIR, 'models', 'xgboost_model.pkl')
+            s_path = os.path.join(BASE_DIR, 'models', 'scaler.pkl')
+
+        if os.path.exists(m_path) and os.path.exists(s_path):
+            try:
+                self.model = joblib.load(m_path)
+                self.scaler = joblib.load(s_path)
+                self.selected_model_name = model_name
+                self.logger.info("\033[92m[✓] Active ML Model: %s\033[0m", model_name.upper())
+                self.logger.info("\033[92m[✓] Auto-Mitigation: %s (threshold=%d, timeout=%ds, poll=%.1fs)\033[0m",
+                                "ENABLED" if self.mitigation_enabled else "DISABLED",
+                                self.alert_threshold, self.block_timeout, self.monitor_interval)
+            except Exception as e:
+                self.logger.error("[!] Failed to load model %s: %s", model_name, e)
+        else:
+            self.logger.warning("[!] Model file not found: %s", m_path)
 
     def _monitor(self):
         while True:
+            self._reload_config()
             for dp_id, dp in self.datapaths.items():
                 self._request_stats(dp)
-            hub.sleep(MONITOR_INTERVAL)
+            hub.sleep(self.monitor_interval)
 
     def _request_stats(self, datapath):
         parser = datapath.ofproto_parser
@@ -167,7 +231,12 @@ class RealtimeDetector(app_manager.OSKenApp):
                         ipv4_src=ip_pkt.src, ipv4_dst=ip_pkt.dst,
                         ip_proto=ip_pkt.proto)
             else:
-                match = parser.OFPMatch(in_port=in_port, eth_dst=dst, eth_src=src)
+                match = parser.OFPMatch(
+                    in_port=in_port,
+                    eth_type=eth.ethertype,
+                    eth_dst=dst,
+                    eth_src=src,
+                )
 
             if msg.buffer_id != ofproto.OFP_NO_BUFFER:
                 self._add_flow(datapath, 1, match, actions, msg.buffer_id)
@@ -192,6 +261,7 @@ class RealtimeDetector(app_manager.OSKenApp):
         body = ev.msg.body
         datapath = ev.msg.datapath
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        updated_any = False
 
         for stat in body:
             if 'ipv4_src' not in stat.match or 'ipv4_dst' not in stat.match:
@@ -213,29 +283,61 @@ class RealtimeDetector(app_manager.OSKenApp):
                 pkt_per_sec, byte_per_sec, pkt_size_avg, duration
             ]], columns=FEATURE_COLS)
 
+            t0 = time.perf_counter()
             features_scaled = self.scaler.transform(features)
             prediction = self.model.predict(features_scaled)[0]
+            inf_time = (time.perf_counter() - t0) * 1000.0  # in ms
+            self.last_inference_latency_ms = round(inf_time, 3)
+
             label = LABEL_MAP.get(prediction, 'UNKNOWN')
             self.flows_analyzed += 1
+            updated_any = True
+
+            if label == 'NORMAL':
+                self.normal_count += 1
+            elif label == 'DDOS':
+                self.ddos_count += 1
+            elif label == 'PORTSCAN':
+                self.portscan_count += 1
 
             ip_src = stat.match['ipv4_src']
             ip_dst = stat.match['ipv4_dst']
+            is_blocked = (ip_src in self.blocked_ips)
+
+            # Record recent flow (kể cả Normal)
+            flow_entry = {
+                'timestamp': timestamp,
+                'ip_src': ip_src,
+                'ip_dst': ip_dst,
+                'tp_src': int(tp_src),
+                'tp_dst': int(tp_dst),
+                'ip_proto': int(ip_proto),
+                'packet_count': int(stat.packet_count),
+                'packet_count_per_sec': round(float(pkt_per_sec), 1),
+                'byte_count_per_sec': round(float(byte_per_sec), 1),
+                'prediction': label,
+                'blocked': is_blocked,
+                'latency_ms': self.last_inference_latency_ms
+            }
+            self.recent_flows.append(flow_entry)
+            if len(self.recent_flows) > MAX_RECENT_FLOWS:
+                self.recent_flows = self.recent_flows[-MAX_RECENT_FLOWS:]
 
             # Alert nếu phát hiện tấn công
             if label != 'NORMAL':
                 self.logger.warning(
                     "\033[91m⚠️  ALERT [%s] %s -> %s | proto=%d | "
-                    "pkts/s=%.1f | bytes/s=%.1f | prediction=%s\033[0m",
+                    "pkts/s=%.1f | bytes/s=%.1f | prediction=%s (latency=%.3fms)\033[0m",
                     timestamp, ip_src, ip_dst,
-                    ip_proto, pkt_per_sec, byte_per_sec, label
+                    ip_proto, pkt_per_sec, byte_per_sec, label, self.last_inference_latency_ms
                 )
 
                 blocked_now = False
                 # === AUTO-MITIGATION ===
-                if MITIGATION_ENABLED and ip_src not in self.blocked_ips:
+                if self.mitigation_enabled and ip_src not in self.blocked_ips:
                     self.alert_counter[ip_src] += 1
 
-                    if self.alert_counter[ip_src] >= ALERT_THRESHOLD:
+                    if self.alert_counter[ip_src] >= self.alert_threshold:
                         self._block_attacker(datapath, ip_src, label)
                         blocked_now = True
 
@@ -243,13 +345,46 @@ class RealtimeDetector(app_manager.OSKenApp):
                     'timestamp': timestamp,
                     'ip_src': ip_src,
                     'ip_dst': ip_dst,
+                    'tp_dst': int(tp_dst),
                     'ip_proto': int(ip_proto),
                     'packet_count_per_sec': float(pkt_per_sec),
                     'byte_count_per_sec': float(byte_per_sec),
                     'prediction': label,
-                    'blocked': blocked_now or (ip_src in self.blocked_ips),
+                    'blocked': blocked_now or is_blocked,
                     'flows_analyzed': self.flows_analyzed,
+                    'latency_ms': self.last_inference_latency_ms
                 })
+
+        if updated_any:
+            self._save_live_stats()
+
+    def _save_live_stats(self):
+        """Lưu telemetry & live stats ra dataset/live_stats.json cho Dashboard."""
+        try:
+            payload = {
+                'updated_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'flows_analyzed': self.flows_analyzed,
+                'normal_count': self.normal_count,
+                'ddos_count': self.ddos_count,
+                'portscan_count': self.portscan_count,
+                'blocked_ips': sorted(list(self.blocked_ips)),
+                'active_switches': list(self.datapaths.keys()),
+                'last_latency_ms': self.last_inference_latency_ms,
+                'recent_flows': self.recent_flows[-30:],
+                'config': {
+                    'polling_interval': self.monitor_interval,
+                    'alert_threshold': self.alert_threshold,
+                    'block_timeout': self.block_timeout,
+                    'mitigation_enabled': self.mitigation_enabled,
+                    'selected_model': self.selected_model_name
+                }
+            }
+            tmp = LIVE_STATS_LOG + '.tmp'
+            with open(tmp, 'w', encoding='utf-8') as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, LIVE_STATS_LOG)
+        except Exception as exc:
+            self.logger.error("[!] Failed to write live stats: %s", exc)
 
     def _append_alert(self, alert):
         """Ghi alert ra dataset/alerts.json (atomic) để Web Dashboard đọc."""
@@ -273,7 +408,7 @@ class RealtimeDetector(app_manager.OSKenApp):
     def _block_attacker(self, datapath, attacker_ip, attack_type):
         """
         Cài đặt DROP rule trên TẤT CẢ switches để chặn traffic từ attacker IP.
-        Rule có hard_timeout → tự động gỡ sau BLOCK_TIMEOUT giây.
+        Rule có hard_timeout → tự động gỡ sau self.block_timeout giây.
         """
         if attacker_ip in self.blocked_ips:
             return
@@ -309,7 +444,7 @@ class RealtimeDetector(app_manager.OSKenApp):
                 priority=BLOCK_PRIORITY,
                 match=dp_match,
                 instructions=dp_inst,
-                hard_timeout=BLOCK_TIMEOUT,  # Tự gỡ sau N giây
+                hard_timeout=self.block_timeout,  # Tự gỡ sau N giây
                 idle_timeout=0,
                 flags=dp_ofproto.OFPFF_SEND_FLOW_REM  # Notify khi rule bị xóa
             )
@@ -319,7 +454,7 @@ class RealtimeDetector(app_manager.OSKenApp):
             "\033[91;1m🚫 BLOCKED [%s] Attacker IP %s on ALL switches | "
             "Attack: %s | Duration: %ds | Alerts: %d\033[0m",
             datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            attacker_ip, attack_type, BLOCK_TIMEOUT,
+            attacker_ip, attack_type, self.block_timeout,
             self.alert_counter[attacker_ip]
         )
 
@@ -339,5 +474,6 @@ class RealtimeDetector(app_manager.OSKenApp):
                 self.logger.info(
                     "\033[93m🔓 UNBLOCKED [%s] IP %s - block timeout expired (%ds)\033[0m",
                     datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                    unblocked_ip, BLOCK_TIMEOUT
+                    unblocked_ip, self.block_timeout
                 )
+

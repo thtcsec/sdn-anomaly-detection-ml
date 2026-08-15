@@ -1,0 +1,12 @@
+{
+  "dataset": "cicids2017_3class",
+  "source": "cicids2017_public",
+  "rows_flow_stats": 880176,
+  "rows_train_after_smote": 1589718,
+  "rows_test": 176036,
+  "split_protocol": "stratified_random_flow_split",
+  "split_note": "Public benchmark only; source-held-out CV is not valid because DDOS and PortScan each live in dedicated source files.",
+  "missing_public_cols_strategy": "If Protocol is absent, infer TCP(6) when TCP flag counts > 0 else 0; if Source Port is absent, use sentinel -1.",
+  "supervised_train_cap_per_class": 100000,
+  "unsupervised_normal_train_cap": 100000
+}

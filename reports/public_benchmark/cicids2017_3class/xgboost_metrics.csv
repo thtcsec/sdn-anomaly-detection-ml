@@ -1,0 +1,2 @@
+Model,Approach,Classification,MetricScope,Accuracy,Precision,Recall,F1-Score,Train_Time_sec,Predict_Test_sec,Inference_ms_per_sample
+XGBoost,Supervised,Multiclass,macro_multiclass,0.9994432956895181,0.9989230588786806,0.9992928772556771,0.9991078746017091,12.015712299966253,0.33894980000332,2.879463899997063

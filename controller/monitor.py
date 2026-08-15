@@ -216,8 +216,14 @@ class FlowMonitor(app_manager.OSKenApp):
                         ip_proto=ip_pkt.proto
                     )
             else:
-                # Non-IP packet (ARP, etc.) - match L2
-                match = parser.OFPMatch(in_port=in_port, eth_dst=dst, eth_src=src)
+                # Non-IP (ARP, ...): MUST include eth_type so ARP rules
+                # do not swallow later TCP/UDP and hide L4 DDoS flows.
+                match = parser.OFPMatch(
+                    in_port=in_port,
+                    eth_type=eth.ethertype,
+                    eth_dst=dst,
+                    eth_src=src,
+                )
 
             if msg.buffer_id != ofproto.OFP_NO_BUFFER:
                 self._add_flow(datapath, 1, match, actions, msg.buffer_id)

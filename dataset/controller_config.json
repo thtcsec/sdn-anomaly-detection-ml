@@ -1,0 +1,7 @@
+{
+  "polling_interval": 5.0,
+  "alert_threshold": 3,
+  "block_timeout": 120,
+  "mitigation_enabled": true,
+  "selected_model": "xgboost"
+}

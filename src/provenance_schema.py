@@ -84,3 +84,51 @@ ALLOWED_LAB_IPV4 = {
     '10.0.0.6',
 }
 ALLOWED_LAB_CIDR = '10.0.0.0/24'
+
+SOURCE_FAULT = 'mininet_lab_fault_run'
+FAULT_AFFECTED_LINK = 's1-s2'
+FAULT_TOPOLOGY_ID = TOPOLOGY_DEFAULT
+
+# Model input for the fault dataset. Ground-truth / identity stay out.
+FAULT_MODEL_FEATURES = [
+    'packet_count_sum',
+    'byte_count_sum',
+    'delta_packet_sum',
+    'delta_byte_sum',
+    'packet_rate_window_sum',
+    'byte_rate_window_sum',
+    'packet_size_avg_mean',
+    'n_flows',
+    'rx_bps_core',
+    'tx_bps_core',
+    'delta_rx_dropped_core',
+    'delta_tx_dropped_core',
+    'drop_rate_core',
+    'delta_rx_errors_core',
+    'delta_tx_errors_core',
+    'rtt_mean_ms',
+    'rtt_min_ms',
+    'rtt_max_ms',
+    'probe_loss_pct',
+    'throughput_mbps',
+    'jitter_ms',
+]
+
+FAULT_FORBIDDEN_FEATURES = [
+    'run_id',
+    'scenario_id',
+    'fault_label',
+    'fault_family',
+    'fault_severity',
+    'affected_link',
+    'configured_bw',
+    'configured_loss',
+    'configured_delay',
+    'ip_src',
+    'ip_dst',
+    'tp_src',
+    'tp_dst',
+    'capture_session_id',
+    'start_time',
+    'end_time',
+]

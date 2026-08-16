@@ -1,5 +1,7 @@
 # Hướng dẫn sửa Word & Slides (Thiện copy số ở đây)
 
+Hội đồng hỏi pipeline / lý thuyết / CSV: dán `docs/VA_HOI_DONG_LY_THUYET_VA_SO_DO.md` + 4 hình method trong mục 7.
+
 Chỉ dùng số mục 1–2 trên slide/chương Kết quả. **Không** dùng 231.314 / 20k Normal giả / Acc 0,80 / Acc 0,9999 làm số chính.
 
 Người sửa: Trần Minh Thiện. Nguồn số: `reports/binary_realtime_loso_summary.csv`.
@@ -140,12 +142,16 @@ Danh mục hình hiện tại của PDF chỉ có **3 chỗ đã đánh số**. 
 | **Hình 2** · tr. 46 · Phụ lục H / mục 4.7.3 | Dashboard lúc DDoS | `reports/dashboard_live_alert.png` (cùng file `reports/thesis_shots/04_dashboard_ddos.png`) | Phiên lab 16/08/2026: h4 `hping3` → 10.0.0.1. Có ALERT, DROP `10.0.0.4`. Latency trên KPI là **lần suy luận live lúc flood**, không phải benchmark 0,33 ms. |
 | **Hình 3** · tr. 47 · Phụ lục H / mục 4.7.2 | Log ALERT controller | `reports/controller_alert_terminal.png` | Log thật: `ALERT ... 10.0.0.4 -> 10.0.0.1 ... prediction=DDOS` rồi `BLOCKED ... 10.0.0.4`. **Không** còn warning feature names. |
 
+Văn + Q&A hội đồng (lý thuyết Mininet/os-ken/4 model, sinh CSV, quyền khẳng định): `docs/VA_HOI_DONG_LY_THUYET_VA_SO_DO.md`.
+
 ### Nên chèn thêm (đánh số Hình 4…, cập nhật Danh mục hình)
 
 | Vị trí Word | File | Vì sao |
 |-------------|------|--------|
-| **1.1** hoặc **3.2** (sau mô tả topo 2 switch / 6 host) | `reports/network_topology.png` | Sơ đồ Mininet h1–h6, s1–s2, os-ken. |
-| **3.2** Bước 1–8 hoặc **4.7.1** | `reports/system_architecture.png` | Pipeline thu thập → train → realtime. Caption: SMOTE chỉ dùng random-split phụ, **không** dùng LOSO. |
+| **Ch.2 đầu** (trước mô tả dataset) | `reports/system_architecture_method.png` | Hai đường Control: `monitor.py` thu CSV / `realtime_detector.py` DROP. |
+| **1.1** hoặc **3.2** (sau mô tả topo 2 switch / 6 host) | `reports/network_topology_method.png` | Sơ đồ Mininet h1–h6, s1–s2, os-ken, mũi tên h4→h1. |
+| **Ch.2 thu thập** | `reports/data_collection_pipeline_method.png` | 8 bước sinh CSV + provenance `run_id`. |
+| **Ch.2 method** | `reports/input_method_pipeline_method.png` | Input Flow Stats, 10 vs 8 feature, LOSO = nhận xét lab. |
 | **4.7.2** startup | `reports/controller_startup.png` | Load XGBoost, mitigation 3 / 120s / poll 5s. |
 | **4.7.3** idle | `reports/dashboard_idle.png` | 0 flow, 6 host NORMAL. |
 | **4.7.3** Normal | `reports/dashboard_normal.png` | ping/iperf, nhãn NORMAL, 0 DROP. |

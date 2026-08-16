@@ -3,9 +3,33 @@
 **Đề tài:** Phát hiện bất thường và phân loại lỗi mạng SDN bằng học máy  
 **Nhóm:** Trịnh Hoàng Tú · Trần Minh Thiện | HUFLIT · An ninh mạng · K29  
 **GVHD:** ThS. Cao Tiến Thành  
+**Khớp `KLTN.pdf` ~81 trang (16/08/2026):** Hình 1–4 = method; Bảng 1 khái niệm; Ch.1.3–1.5 fault; 2.1.6 + Protocol D + 4.9 = tập lỗi liên kết (đang thu, chưa bịa số).
 
-**Cách dùng:** đọc phần A (lý thuyết ngắn) → luyện phần B (Q&A) toạc miệng, không đọc nguyên văn.  
-Số liệu lấy từ `reports/` tại thời điểm nộp (làm tròn như trong luận văn).
+**Cách dùng:** 15 phút đọc mục **0 + E + F**; Q&A mục B toạc miệng.  
+Số anomaly: `reports/binary_realtime_loso_summary.csv`. Fault: chỉ nói sau `merge_fault_runs.py` có file thật.
+
+---
+
+# 0. BẢN ĐỒ LUẬN MỚI — nói 90 giây
+
+Hai nhánh **cùng topology** Mininet 2SW/6H, **không trộn CSV / không trộn Acc**.
+
+| Nhánh | Câu đề tài | Dữ liệu | Đánh giá | Prototype |
+|-------|------------|---------|----------|-----------|
+| An ninh (anomaly) | phát hiện bất thường | 79.114 snapshot · 32 run · 19 scenario · N/DDoS/Portscan | LOSO binary 8 feature | `realtime_detector.py` XGB + DROP |
+| Lỗi liên kết (fault) | phân loại lỗi mạng | 12 scenario × 3 run trên `s1↔s2` | Protocol D LOSO `fault_family` | **chưa** gắn DROP; chỉ thu + phân loại offline |
+
+**Bảng 1 (khái niệm) — bắt buộc thuộc:**
+
+| | Anomaly | Tấn công | Lỗi mạng (fault) |
+|--|---------|----------|------------------|
+| Nghĩa | lệch hành vi so với Normal | cố ý (hping3/nmap) | suy giảm liên kết (bw/loss/delay) |
+| Ground truth | cửa sổ `current_label.txt` | tool tấn công | `tc` Mininet trên s1–s2 |
+| Telemetry | FlowStats lifetime + rate | FlowStats | Δ FlowStats + **PortStats** + **ping/iperf** |
+
+PDF 1.5.2 còn typo **Package → Packet**. Nói miệng “packet loss”.
+
+**Quyền khẳng định:** dữ liệu tự thu Mininet → nhận xét testbed, không suy SDN trường / không so “hơn bài báo”.
 
 ---
 
@@ -21,19 +45,20 @@ Số liệu lấy từ `reports/` tại thời điểm nộp (làm tròn như tr
 ## A2. Pipeline hệ thống (1 câu)
 
 ```
-Mininet (A4 topo 2SW/6H)
-  → os-ken monitor: thu flow → flow_stats.csv
-  → preprocess: clean → split → SMOTE(train) → train.csv/test.csv
-  → train: XGB / RF / IF / AE (+ scaler riêng từng model)
-  → realtime: controller/realtime_detector.py (XGB) + DROP rule + dashboard
+Mininet 2SW/6H
+  → [A] monitor.py        → independent_runs → flow_stats_grouped.csv (79.114)
+  → [B] realtime_detector → XGB 10 feat → Alert×3 → DROP 120s + dashboard
+  → [C] fault_monitor     → fault_live → fault_runs → fault_stats_grouped.csv
+A và C không chạy cùng lúc (cùng cổng 6633). A không dùng lúc demo. C không ghi flow_stats.csv.
 ```
 
-**Hai app controller (nhớ rõ):**
+**Ba app controller:**
 
 | App | Launcher | Việc |
 |-----|----------|------|
-| `controller/monitor.py` | `run_controller.py` | Thu CSV (dataset) |
-| `controller/realtime_detector.py` | `run_realtime.py` | Predict + alert + auto-block |
+| `controller/monitor.py` | `run_controller.py` | Thu anomaly CSV |
+| `controller/realtime_detector.py` | `run_realtime.py` | Predict + DROP |
+| `controller/fault_monitor.py` | `run_fault_monitor.py` | Flow Δ + PortStats → `dataset/fault_live/` |
 
 ## A3. Dataset & provenance
 
@@ -156,7 +181,7 @@ Mỗi câu: **Ý trả lời ngắn** → **Câu nói miệng** → **Bẫy / đ
 ### Q5. Tại sao Portscan áp đảo? Có bias không?
 
 **Nói:**  
-> nmap sinh nhiều flow ngắn → số mẫu lớn. Em xử lý bằng SMOTE trên train + đánh giá macro / per-class, không chỉ Accuracy.  
+> nmap sinh nhiều flow ngắn nên Portscan từng áp đảo bảng cũ. Pool hiện tại **DDoS 54,6% · Portscan 25,6% · Normal 19,8%**. Vẫn imbalance; LOSO không SMOTE. Random-split phụ lục mới SMOTE train.  
 
 ### Q6. DDoS chỉ 6 mẫu thật — có đủ không?
 
@@ -309,7 +334,7 @@ Mỗi câu: **Ý trả lời ngắn** → **Câu nói miệng** → **Bẫy / đ
 ### Q30. Làm tiếp gì?
 
 **Nói:**  
-> Thu thêm DDoS/Normal thật theo `run_id`; bootstrap sau split; đánh giá cross-topo; tinh chỉnh mitigation; nếu có thời gian thì làm ETL riêng cho FortiGate HUFLIT như external stress test.  
+> Nhánh fault 12×3 trên s1–s2 đã có pipeline; ưu tiên chạy xong merge/LOSO rồi điền 4.9. Không thu thêm dump anomaly bẩn. Cross-topo / FortiGate không phải việc tuần này.  
 
 **Nếu hỏi “ưu tiên cái gì nhất?”**  
 > Em ưu tiên benchmark grouped trong chính lab SDN trước, vì nó đúng đề tài hơn mọi benchmark ngoài.  
@@ -381,3 +406,102 @@ python controller/run_realtime.py   # demo
 ```
 
 Ôn xong: mỗi người trả lời toạc **Q20, Q10, Q23, Q6, Q28** không nhìn tài liệu.
+
+---
+
+# E. SINH TRAFFIC / THU DATA — thuộc lòng
+
+## E1. Anomaly (tập 79.114) — đã thu xong, không thu thêm dump bẩn
+
+1. T1: `python controller/run_controller.py` → `monitor.py` poll **5s** `OFPFlowStatsRequest`.
+2. `dataset/current_label.txt` = `normal` | `ddos` | `portscan` (nhãn **cửa sổ**, không phải từng gói).
+3. Host Mininet:
+   - Normal: ping / iperf / HTTP — `src/collect_independent_normal_runs.py`
+   - DDoS: hping3 SYN/UDP/ICMP — `src/collect_independent_ddos_runs.py` (chỉ `10.0.0.1–6`)
+   - Portscan: nmap — `src/collect_independent_portscan_runs.py`
+4. Mỗi poll: 5-tuple + `packet_count`, `byte_count`, `duration` → tính pkt/s, byte/s, `packet_size_avg` → append `flow_stats.csv`.
+5. Cắt theo thời gian run → `dataset/independent_runs/run_*.csv` (`run_id`, `scenario_id`).
+6. `python src/merge_independent_runs.py` → **`flow_stats_grouped.csv`**.
+7. Đánh giá chính: `python src/eval_binary_realtime_scenario_held_out.py` (8 feature, bỏ cổng, 3 poll đầu, 19 scenario).
+
+**Không** dùng `flow_stats.csv` 155k dump làm số chính. **Không** nút dashboard “Bắn” khi bảo vệ.
+
+## E2. Fault (đang thu) — cùng topo, file khác
+
+1. T1: `python controller/run_fault_monitor.py` — **không** `run_controller.py`.
+2. T2: `sudo python3 src/collect_independent_fault_runs.py`  
+   Inject `tc` trên **s1↔s2**: B 50/20/10 Mbit · L 1/5/10% · D 20/50/100ms · N1–N3 baseline.
+3. Traffic cross-switch: ping h1→h4, iperf TCP, HTTP, UDP iperf (mixed).
+4. Probe: ping RTT/loss + iperf throughput/jitter mỗi ~5s.
+5. PortStats: `rx/tx_bytes`, `rx/tx_dropped`, `rx/tx_errors` → delta, bps, drop_rate.
+6. Flow: **cửa sổ** `Δpacket/Δt`, không chỉ `packet_count/duration` lifetime.
+7. `python src/merge_fault_runs.py` → `dataset/fault_stats_grouped.csv`
+8. `python src/eval_fault_loso.py` — cấm `configured_*`, IP, `run_id` làm feature.
+
+12×3 = 36 run. Snapshot ≠ experiment độc lập.
+
+## E3. Demo realtime (không phải thu dataset)
+
+```
+T1 python controller/run_realtime.py
+T2 python dashboard/app.py
+T3 sudo python3 topology/custom_topo.py
+mininet> h1 ping -c 4 10.0.0.2
+mininet> h4 hping3 -S --flood -p 80 10.0.0.1   # ~15s Ctrl+C
+```
+
+Chrome: IP WSL `:5000` nếu `127.0.0.1` refused.
+
+---
+
+# F. FILE / HÀM TRIỂN KHAI
+
+| Việc | File | Hàm / điểm bắt |
+|------|------|----------------|
+| Topo 2s6h | `topology/custom_topo.py` | `SDNAnomalyTopo.build` |
+| Learning switch + ghi CSV anomaly | `controller/monitor.py` | `_monitor`, `_request_stats`, `flow_stats_reply_handler` |
+| Realtime XGB + DROP | `controller/realtime_detector.py` | poll, predict, `OFPFlowMod` DROP |
+| Dashboard | `dashboard/app.py` | đọc `live_stats.json`, `alerts.json` |
+| Fault Flow+Port+Δ | `controller/fault_monitor.py` | `flow_stats_reply_handler`, `port_stats_reply_handler` |
+| Inject s1–s2 | `src/fault_link.py` | `apply_core_fault`, `clear_core_qos` |
+| Thu fault 12×3 | `src/collect_independent_fault_runs.py` | `_scenarios`, `_traffic`, `_probe_loop` |
+| Schema / cấm leakage | `src/provenance_schema.py` | `FEATURE_COLS`, `FAULT_MODEL_FEATURES`, `FAULT_FORBIDDEN_FEATURES` |
+| Preprocess anomaly | `src/preprocess.py` | `load_data` (lọc synthetic), SMOTE **chỉ** 80/20 |
+| LOSO 4 model | `src/eval_binary_realtime_scenario_held_out.py` | |
+| LOSO fault | `src/eval_fault_loso.py` | |
+| An toàn lab IP | `src/lab_safety.py` | `assert_lab_targets` |
+
+Launcher: `run_controller.py` · `run_realtime.py` · `run_fault_monitor.py`.
+
+---
+
+# G. LÝ THUYẾT — hội đồng hay hỏi (khớp Ch.1 PDF)
+
+**OpenFlow hai đường:** Packet-In/FlowMod = chuyển tiếp; `OFPFlowStatsRequest/Reply` = input ML anomaly. Fault thêm `OFPPortStatsRequest/Reply`.
+
+**Vì sao FlowStats lifetime không đủ cho fault?**  
+`packet_rate = packet_count/duration` là trung bình cả đời flow → chậm khi bw/loss đổi. Cần `Δpacket/Δt` (poll 5s). Delay **không** có trong FlowStats → bắt buộc ping RTT.
+
+**PortStats:** `rx_dropped/tx_dropped` sát packet loss trên port s1–s2.
+
+**Bốn model (baseline, không mới):** RF bagging [3] · XGB boosting + regularize [4] · IF path length [5] · AE reconstruction error [7]. Deploy XGB vì ~0,33 ms/flow.
+
+**LOSO:** giữ nguyên 1 `scenario_id` làm test. Random 80/20 Acc ~1 vì rò cùng 5-tuple poll 5s.
+
+**ML-LFIL [15]:** rate + delay + loss trên Mininet — *hướng đo*, không phải dataset của nhóm.
+
+**Cấm nói:** Acc 99,99% · FPR=0% · production · fault Acc khi chưa có `fault_loso_summary.csv` · CICIDS train controller · “bỏ 3 poll đầu” (đúng là **giữ** 3 poll đầu).
+
+---
+
+# C. CHEAT SHEET 60 GIÂY (trước vào phòng)
+
+1. Hai nhánh: bất thường lưu lượng **và** lỗi liên kết cùng topo — không trộn số.  
+2. Anomaly = **79.114 snapshot / 5s** (23.843 5-tuple · 19 scenario · 32 run). Không 231k.  
+3. Số chính LOSO: XGB Acc 0,92 · F1 0,95 · min recall 0,13 · FPR ~0,25. AE/IF ~0,08. Acc 0,9999 **cấm**.  
+4. Deploy **XGB** vì latency; DROP 3 alert × 5s, timeout **120s**.  
+5. Fault: inject `s1–s2`; feature = Δ flow + port + RTT; **không** đưa `configured_loss=10` vào model.  
+6. Dữ liệu của nhóm → **nhận xét lab**, không khẳng định mạng thật.  
+7. Không invent thuật toán.  
+8. Demo gõ `mininet>`, không bấm 3 nút Bắn.
+

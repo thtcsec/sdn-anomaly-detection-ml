@@ -1,6 +1,18 @@
 # Thesis evaluation protocol (SDN anomaly detection)
 
-## Four benchmarks — do not confuse them
+## Five tracks — do not mix anomaly and fault
+
+### Fault dataset (second pool — same topology, not a public dump)
+
+- Does **not** replace the 79,114 DDoS/Portscan/Normal snapshots.
+- Collect on `s1↔s2` with Mininet `tc` (bw / loss / delay). 12 scenarios × 3 runs.
+- Controller: `python controller/run_fault_monitor.py` (FlowStats **delta** + PortStats). Never `run_controller.py` during fault capture.
+- Scripts: `src/collect_independent_fault_runs.py`, `src/merge_fault_runs.py`, `src/eval_fault_loso.py`
+- Files: `dataset/fault_runs/`, `dataset/fault_stats_grouped.csv`, `docs/FAULT_DATASET.md`
+- Model features: `FAULT_MODEL_FEATURES`. Forbidden: labels, `configured_*`, IPs, ids.
+- Cite as lab observations. Related work: ML-LFIL on Mininet (rate / delay / loss), not as our dataset.
+
+## Four anomaly benchmarks — do not confuse them
 
 ### 0) Primary generalization — Leave-One-Scenario-Out (protocol D)
 

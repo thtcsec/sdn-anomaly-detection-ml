@@ -1,0 +1,22 @@
+Environment that produced the locked evaluation tables
+======================================================
+Python              3.11.9
+xgboost             3.2.0
+scikit-learn        1.7.2
+pandas              2.3.1
+numpy               2.2.6
+tensorflow          2.21.0
+imbalanced-learn    0.14.2
+joblib              1.5.2
+os-ken              4.2.0
+matplotlib          3.10.5
+seaborn             0.13.2
+flask               2.3.3
+
+Primary table: reports/binary_realtime_loso_summary.csv
+Command: python src/eval_binary_realtime_scenario_held_out.py
+Data: dataset/flow_stats_grouped.csv
+
+Do not cite XGBoost 2.0.3 / scikit-learn 1.4.2 / TensorFlow 2.16.1 /
+pandas 2.2.2 / numpy 1.26.4 as the environment of the final table.
+Those were older draft versions.

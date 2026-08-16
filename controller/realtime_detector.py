@@ -325,11 +325,15 @@ class RealtimeDetector(app_manager.OSKenApp):
 
             # Alert nếu phát hiện tấn công
             if label != 'NORMAL':
+                alert_line = (
+                    f"ALERT [{timestamp}] {ip_src} -> {ip_dst} | proto={ip_proto} | "
+                    f"pkts/s={pkt_per_sec:.1f} | bytes/s={byte_per_sec:.1f} | "
+                    f"prediction={label}"
+                )
+                print(f"\033[91m⚠️  {alert_line}\033[0m", flush=True)
                 self.logger.warning(
-                    "\033[91m⚠️  ALERT [%s] %s -> %s | proto=%d | "
-                    "pkts/s=%.1f | bytes/s=%.1f | prediction=%s (latency=%.3fms)\033[0m",
-                    timestamp, ip_src, ip_dst,
-                    ip_proto, pkt_per_sec, byte_per_sec, label, self.last_inference_latency_ms
+                    "\033[91m⚠️  %s (latency=%.3fms)\033[0m",
+                    alert_line, self.last_inference_latency_ms
                 )
 
                 blocked_now = False
@@ -357,6 +361,12 @@ class RealtimeDetector(app_manager.OSKenApp):
 
         if updated_any:
             self._save_live_stats()
+            print(
+                f"[poll] flows={self.flows_analyzed} "
+                f"normal={self.normal_count} ddos={self.ddos_count} "
+                f"portscan={self.portscan_count} blocked={sorted(self.blocked_ips) or '-'}",
+                flush=True,
+            )
 
     def _save_live_stats(self):
         """Lưu telemetry & live stats ra dataset/live_stats.json cho Dashboard."""
@@ -450,13 +460,14 @@ class RealtimeDetector(app_manager.OSKenApp):
             )
             dp.send_msg(mod)
 
-        self.logger.error(
-            "\033[91;1m🚫 BLOCKED [%s] Attacker IP %s on ALL switches | "
-            "Attack: %s | Duration: %ds | Alerts: %d\033[0m",
-            datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            attacker_ip, attack_type, self.block_timeout,
-            self.alert_counter[attacker_ip]
+        block_line = (
+            f"BLOCKED [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
+            f"Attacker IP {attacker_ip} on ALL switches | "
+            f"Attack: {attack_type} | Duration: {self.block_timeout}s | "
+            f"Alerts: {self.alert_counter[attacker_ip]}"
         )
+        print(f"\033[91;1m🚫 {block_line}\033[0m", flush=True)
+        self.logger.error("\033[91;1m🚫 %s\033[0m", block_line)
 
         # Reset counter sau khi block
         self.alert_counter[attacker_ip] = 0

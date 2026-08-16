@@ -1,0 +1,5 @@
+model,protocol,Accuracy,F1_macro
+XGBoost,Random-flow split (lab dễ tách),0.9999368008595084,0.999905650626912
+RandomForest,Random-flow split (lab dễ tách),0.9996840042975416,0.9995281509313116
+RandomForest,GroupKFold theo run_id,0.9873146909779232,0.9646215193860124
+XGBoost,GroupKFold theo run_id,0.9822944991811696,0.960969336467464

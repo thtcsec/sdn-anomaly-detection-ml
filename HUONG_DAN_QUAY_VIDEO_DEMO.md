@@ -49,7 +49,10 @@ sudo mn -c
 /usr/bin/python3 topology/custom_topo.py
 ```
 
-Kiểm tra: 4 KPI hiện, topology 2SW/6H, nút 🟢 Normal / 🔴 DDoS / 🟠 Portscan, **không** alert đỏ sẵn.
+Kiểm tra: 4 KPI hiện, topology 2SW/6H, **không** alert đỏ sẵn.  
+Mở **Cấu hình SOC**: không còn dòng `Accuracy: 99.91%` / `97.80%`. Phải thấy `10-feature multiclass` và latency `~0.33` / `~15.25 ms/flow`.
+
+**Không dùng 3 nút Bắn traffic để quay thesis/video.** Gõ lệnh trong `mininet>` (mục 4). Nút dashboard chỉ gọi `scripts/trigger_traffic.py` khi Mininet đang chạy; toast “đã gửi lệnh” ≠ traffic thật.
 
 ---
 
@@ -70,7 +73,7 @@ Rê chuột: KPI → topology 2 switch 6 host → biểu đồ live.
 
 ### Cảnh 2 — Normal (0:40–1:10)
 
-Bấm **🟢 Bắn Normal (iperf/ping)**.  
+Trong `mininet>`: `h1 ping -c 8 10.0.0.2` (hoặc iperf). **Không** bấm nút Bắn Normal.  
 Cột prediction **NORMAL** xanh. Không DROP.
 
 Nếu lỡ có alert đỏ: **cắt cảnh**, quay lại Normal. Đừng để lại rồi gắn chữ “FPR 0%”.
@@ -83,7 +86,7 @@ Nếu lỡ có alert đỏ: **cắt cảnh**, quay lại Normal. Đừng để l
 
 ### Cảnh 3 — DDoS + auto-block (1:10–2:20) — cảnh chính
 
-Bấm **🔴 Bắn DDoS (h4 Flood)**. Host `h4` = `10.0.0.4` → `h1`.
+Trong `mininet>`: `h4 hping3 -S --flood -p 80 10.0.0.1` (để ~15s rồi Ctrl+C). **Không** bấm nút Bắn DDoS. Host `h4` = `10.0.0.4` → `h1`.
 
 Chờ 3 chu kỳ poll (~15s): alert 1 → 2 → 3 → **AUTO-BLOCKED 10.0.0.4**.  
 Log controller: DROP priority cao, `hard_timeout` 120s. Traffic flood hạ.
@@ -101,7 +104,7 @@ Không nói “phát hiện 100% mọi DDoS”.
 
 ### Cảnh 4 — Portscan (2:20–2:55)
 
-Bấm **🟠 Bắn Portscan (h6 Nmap)**.  
+Trong `mininet>`: `h6 nmap -sS -p 1-64 --max-rate 80 10.0.0.1`. **Không** bấm nút Bắn Portscan.  
 Nhãn **PORTSCAN** cam, có log. Không cần block nếu chưa đủ 3 poll — không sao.
 
 **Overlay:**
@@ -119,7 +122,7 @@ Mở **⚙️ Cấu hình SOC**. Chỉ **chỉ** (không lưu nếu làm hỏng 
 - Polling 5s
 - Ngưỡng 3
 - Timeout **120s**
-- Model **XGBoost** (đừng đổi Robust / RF lúc quay)
+- Model **XGBoost - Realtime Prototype** (10-feature, ~0.33 ms/flow). Đừng đổi RF lúc quay. Không được thấy Acc 99.91%.
 
 Có thể tắt/bật Auto-Mitigation một cái rồi bật lại.
 
@@ -128,7 +131,7 @@ Có thể tắt/bật Auto-Mitigation một cái rồi bật lại.
 
 ---
 
-## 4. Lệnh Mininet dự phòng (nếu nút dashboard hỏng)
+## 4. Lệnh Mininet (cách chính khi quay / chụp luận văn)
 
 Trong `mininet>`:
 

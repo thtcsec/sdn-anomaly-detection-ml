@@ -1,6 +1,51 @@
 # Thesis evaluation protocol (SDN anomaly detection)
 
-## Three benchmarks — do not confuse them
+## Four benchmarks — do not confuse them
+
+### 0) Primary generalization — Leave-One-Scenario-Out (protocol D)
+
+- Script: `python src/eval_scenario_held_out.py --feature-set all`
+- Pool: `dataset/flow_stats_grouped.csv` (79,114 poll rows → **23,843** last-poll 5-tuples · **19** `scenario_id` · 32 `run_id`)
+- Split: **LeaveOneGroupOut on `scenario_id`**. Repeats of the same scenario stay together.
+- One eval sample = last OpenFlow poll of each 5-tuple per run, not every 5s snapshot.
+- Primary features: **drop raw `tp_src` / `tp_dst`**. `with_raw_ports` is diagnostic only.
+- Headline metric: **recall of the held-out scenario label** (mean / min / max). Do not headline row Accuracy or 3-class F1-macro on single-class holdouts (those F1 values sit near 0.25–0.33 by construction).
+- Outputs: `reports/scenario_held_out_summary.csv`, `scenario_held_out_per_scenario.csv`, `scenario_inventory.csv`, `scenario_held_out_STATUS.csv`
+- **Do NOT cite** random-split Acc 0.9999 or grouped-by-run Acc ≈ 0.98 as generalization.
+
+#### Fair 4-model binary table (locked)
+
+`python src/eval_binary_realtime_scenario_held_out.py` ·
+`reports/binary_realtime_loso_summary.csv`
+
+Same task for all four: Normal vs Attack, LOSO 19 scenarios, first 3 polls,
+no raw ports, no SMOTE.
+
+| Model | Acc pooled | F1 anom | Attack-scenario recall (min) | Normal FPR |
+|-------|------------|---------|------------------------------|------------|
+| XGBoost | 0.9191 | 0.9544 | 0.9074 (0.1342) | 0.2469 |
+| Random Forest | 0.8866 | 0.9349 | 0.8619 (0) | 0.1915 |
+| Autoencoder | 0.0831 | 0.0074 | 0.1022 (0) | 0.0999 |
+| Isolation Forest | 0.0813 | 0.0005 | 0.0707 (0) | 0.1014 |
+
+Pooled scores are not the sole headline. XGB/RF miss `portscan_nmap_h4_h1`.
+AE/IF fail on this lab. Dataset is enough for an honest Mininet table, not
+production. New hold-out runs require interactive WSL sudo; do not fabricate.
+
+#### Current LOSO results (equal weight per scenario)
+
+| Feature set | Model | Held-out recall | min–max |
+|-------------|-------|-----------------|---------|
+| no_raw_ports (primary) | RF | 0.726 ± 0.386 | 0.00–1.00 |
+| no_raw_ports (primary) | XGB | 0.694 ± 0.373 | 0.00–1.00 |
+| with_raw_ports (diagnostic) | RF | 0.861 ± 0.309 | 0.00–1.00 |
+| with_raw_ports (diagnostic) | XGB | 0.826 ± 0.364 | 0.00–1.00 |
+
+Repeated holes without raw ports: `ddos_syn_multi_h4h5_h1h2`, `portscan_nmap_h4_h1`, `portscan_syn_h5_h3_p1_96_r90`, `normal_ping_iperf_light`.
+
+Controller XGB is **not** retrained on this protocol. It remains the Mininet realtime prototype.
+
+Do **not** collect more rows until a behavior hole repeats under this protocol. Adding HTTP-many-ports or DDoS multiport under the old split only inflates correlated snapshots.
 
 ### 1) Legacy internal benchmark (already in thesis tables)
 - Source: `dataset/train.csv` / `test.csv` from random stratified **flow** split on full `flow_stats` (lab + bootstrap DDoS).
@@ -11,7 +56,7 @@
 - **Do write:** “cao nhất trên tập thực nghiệm hiện tại (lab + bootstrap trong pool).”
 - Realtime still uses **XGBoost** (latency ~0.3 ms vs RF ~15 ms).
 
-### 2) Grouped real-only protocol (primary for robustness claims)
+### 2) Grouped real-only protocol (intermediate — scenario overlap remains)
 - Only `is_synthetic==0` **and** known `run_id` (exclude `unknown` legacy).
 - Split by **run_id** (GroupKFold / LeaveOneGroupOut), not by flow.
 - Scaler / optional SMOTE fit **inside train fold only**; test fold never synthetic.
@@ -32,32 +77,31 @@ If STATUS says `insufficient_groups` / `insufficient_labels`:
   inflates unlabeled/portscan rows).
 - The first “~38k DDoS” dump was a **time-window label**, including leftover nmap
   flows still in the OVS table. After attacker↔target + L4 filtering it was ~5.3k.
-- After multiport collection + bidirectional L4 export (including `packet_count=0`
-  unique 5-tuples created by `-p ++`), the honest independent pool is:
-  - **20** known `run_id` groups
-  - **55,515** rows: DDoS **43,206** · portscan **11,731** · normal **578**
-  - `3` normal · `6` portscan · `11` non-empty ddos runs
+- After multiport DDoS + diverse Portscan + real Normal (HTTP/iperf/ping) collection,
+  the honest independent pool is:
+  - **32** known `run_id` groups
+  - **79,114** rows: DDoS **43,206** · Portscan **20,238** · Normal **15,670**
+  - `9` normal · `12` portscan · `11` non-empty ddos runs
 - Merge output: `dataset/flow_stats_grouped.csv`
 
 #### Current grouped results (run-isolated, K=5 by run_id)
 - Random Forest:
-  - `Accuracy = 0.9981 ± 0.0041`
-  - `F1_macro = 0.9881 ± 0.0257`
-  - `DDoS recall ≈ 1.000`
+  - `Accuracy = 0.9873 ± 0.0080`
+  - `F1_macro = 0.9646 ± 0.0259`
+  - `DDoS recall ≈ 0.999`
 - XGBoost:
-  - `Accuracy = 0.8505 ± 0.3339`
-  - `F1_macro = 0.8756 ± 0.2646`
+  - `Accuracy = 0.9823 ± 0.0174`
+  - `F1_macro = 0.9610 ± 0.0459`
   - `DDoS recall ≈ 1.000`
-  - Fold 4 (portscan-heavy holdout) Acc = **0.253** — do not hide this.
+  - Weakest fold Acc ≈ **0.95** (one unseen nmap style). No more Acc 0.25/0.44 fold.
 - Autoencoder / Isolation Forest in this file are **binary anomaly protocols** and
   should not be compared directly against the multiclass RF/XGB rows.
 
 #### Interpretation
-- This grouped benchmark is much more thesis-aligned than the public benchmark,
-  because it still comes from the same SDN/OpenFlow lab collection pipeline.
-- DDoS scarcity is no longer the main grouped weakness; **XGB instability on
-  portscan-held-out runs** is. RF stays high because lab classes remain separable.
-- Do not sell RF Acc≈0.998 as production performance.
+- Grouped-by-run is stricter than random-flow but **weaker than LOSO**: the same
+  `scenario_id` can appear in both train and test.
+- Cite it only as an intermediate analysis, with the words “scenario overlap”.
+- Do not sell RF/XGB Acc ≈ 0.98 as production or as the thesis generalization number.
 
 ### 3) Public supplementary benchmark (CICIDS2017, 3-class)
 - Purpose: patch the thesis's weakest point (`ddos` real lab too small) with a
@@ -129,16 +173,16 @@ Collection targets only Mininet hosts `10.0.0.1`–`10.0.0.6`. No Internet / ext
 > Trên benchmark nội bộ (random-flow split, có mẫu bootstrap trong pool), Random Forest đạt Accuracy=1,0000 — cao nhất trên tập thực nghiệm hiện tại. Kết quả phản ánh traffic lab dễ tách lớp và không được diễn giải như hiệu năng tuyệt đối trên mạng thật. Để đánh giá độ vững theo phiên thu thập độc lập, nghiên cứu bổ sung protocol grouped real-only (tách theo `run_id`, loại synthetic khỏi test). Khi chưa đủ số run độc lập, protocol được mô tả nhưng chưa dùng để kết luận số liệu chính.
 
 ## Suggested Word wording (grouped run-isolated result)
-> Để xử lý hạn chế số mẫu DDoS thực trong tập cũ, nhóm thu bổ sung các phiên lab độc lập có `run_id` và đánh giá theo GroupKFold. Pool hiện tại có 20 phiên, khoảng 55.515 mẫu, trong đó khoảng 43.206 mẫu DDoS lab sau khi loại leftover. Random Forest đạt Accuracy `0,9981 ± 0,0041`, `F1-macro ≈ 0,9881 ± 0,0257`. XGBoost giữ recall DDoS rất cao nhưng Accuracy trung bình chỉ khoảng `0,8505 ± 0,3339` vì một fold hold-out portscan giảm còn khoảng 0,25. Kết quả cho thấy DDoS lab đã đủ để nhận diện, nhưng tổng quát hóa sang phiên portscan độc lập vẫn khó hơn split ngẫu nhiên theo flow.
+> Để xử lý hạn chế số mẫu DDoS thực trong tập cũ, nhóm thu bổ sung các phiên lab độc lập có `run_id` và đánh giá theo GroupKFold. Pool hiện tại có 32 phiên, 79.114 mẫu OpenFlow (DDoS 43.206 · Portscan 20.238 · Normal 15.670). Random Forest đạt Accuracy `0,9873 ± 0,0080`, `F1-macro ≈ 0,9646 ± 0,0259`. XGBoost đạt Accuracy `0,9823 ± 0,0174`, `F1-macro ≈ 0,9610 ± 0,0459`, recall DDoS ≈ 1,0. Fold yếu nhất của XGBoost khoảng 0,95 trên một kiểu nmap chưa thấy. Kết quả cho thấy các lớp lab đã tách được theo phiên độc lập, nhưng random-flow Acc 0,9999 vẫn không được dùng làm số robustness.
 
 ## Suggested Word wording (public supplementary benchmark)
 > Nghiên cứu bổ sung hai benchmark công khai, không trộn vào tập train controller. CICIDS2017 (3 lớp, 880.176 flows) cho XGBoost/Random Forest F1-macro khoảng 0,999. InSDN (domain SDN, 343.889 flows) chỉ có nhãn nhị phân trên mirror hiện có; XGBoost/Random Forest đạt F1 khoảng 0,999. Cả hai chỉ là đối chứng quy mô, không thay thế pipeline OpenFlow tự thu.
 
 ## Autoencoder / Isolation Forest metric labels
 - AE/IF **Precision/Recall/F1** in tables = **Anomaly-class** (binary positive), not macro.
-- AE Acc must match confusion matrix with **train** threshold (`models/autoencoder_threshold.pkl`, ~0.0473). Never use prose threshold 2.355.
+- AE Acc must match confusion matrix with **train** threshold (`models/autoencoder_threshold.pkl`, ~0.0014 on the 79,114 pool). Never use prose threshold 2.355 or the old 0.0473 from the 11k table.
 - Sync helper: `python src/sync_ae_threshold_metrics.py`
-- Details for Word edits: `WORD_EDIT_FOR_THIEN.md`
+- Details for Word edits: `HUONG_DAN_CHINH_SUA_KHOA_LUAN_DOCX_VA_SLIDES.md`
 
 ## Suggested placement
 After the 4-model comparison table: section “Đánh giá bổ sung Full / Real-only / Grouped-by-run / Public benchmark”.

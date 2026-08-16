@@ -1,27 +1,16 @@
-# SDN Controller
+# Versions that produced reports/binary_realtime_loso_summary.csv
+# Python 3.11.9. Do not use unpinned / latest.
+# Thesis Word must list these same versions (not XGBoost 2.0.3 / sklearn 1.4.2).
+
 os-ken==4.2.0
-
-# Machine Learning
 xgboost==3.2.0
-scikit-learn==1.8.0
-joblib==1.5.3
-imbalanced-learn==0.13.0
-
-# Deep Learning (Autoencoder)
+scikit-learn==1.7.2
+joblib==1.5.2
+imbalanced-learn==0.14.2
 tensorflow==2.21.0
 tf_keras>=2.16.0
-
-# Data Processing
-pandas==3.0.3
-numpy==2.4.5
-
-# Visualization
-matplotlib==3.10.9
+pandas==2.3.1
+numpy==2.2.6
+matplotlib==3.10.5
 seaborn==0.13.2
-shap>=0.44.0
-
-# Dashboard
-flask>=3.0.0
-
-# Development Tools
-jupyter==1.1.1
+flask==2.3.3

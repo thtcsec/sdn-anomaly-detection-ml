@@ -8,6 +8,8 @@ Chạy: python controller/run_controller.py
 import sys
 import os
 
+os.environ.setdefault("OSKEN_HUB_TYPE", "eventlet")
+
 # Thêm project root vào path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

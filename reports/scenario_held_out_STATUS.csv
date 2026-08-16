@@ -1,0 +1,2 @@
+status,protocol,n_poll_rows,n_eval_tuples,n_scenarios,n_runs,primary_feature_set,headline_metric,legacy_random_split,grouped_by_run,primary_reports,do_not_cite_as_generalization
+ok,leave_one_scenario_out,79114,23843,19,32,no_raw_ports,recall_heldout_label mean / min / max,reports/model_comparison.csv (appendix only),reports/grouped_real_only_summary.csv (intermediate; scenario overlap),scenario_held_out_summary.csv + scenario_held_out_per_scenario.csv,random Acc 0.9999 ; grouped-by-run Acc ~0.98

@@ -37,16 +37,17 @@ Mininet (A4 topo 2SW/6H)
 
 ## A3. Dataset & provenance
 
-- Bảng luận văn cũ: ~**11.283** mẫu: Portscan 10.565 · Normal 312 · DDoS 406 (trong đó DDoS = **6 lab thật** + **400 bootstrap**)
-- Thu chính ban đầu: `src/collect_data.py` — Normal ping/iperf; DDoS 45s h4/h5/h6; Portscan 3 host
-- **Không lấy `flow_stats.csv` thô sau các phiên thu mới làm số chính** — file này bị monitor append thêm, Portscan phình rất lớn.
-- **Benchmark grouped (lab SDN, `run_id`)**: **20 run** · **55.515** rows: DDoS **43.206** · Portscan **11.731** · Normal **578**
-- Cảnh báo: con số ~38k DDoS lúc đầu là **nhãn cửa sổ thời gian**, dính leftover nmap. Lọc attacker↔target + L4 mới ra số thật.
-- **Benchmark chính trong luận văn** vẫn là lab tự thu; CICIDS2017 (3-class) và InSDN (binary) chỉ là **đối chứng công khai**, không train controller.
+- Bảng luận văn cũ: ~**11.283** mẫu: Portscan 10.565 · Normal 312 · DDoS 406 (6 lab thật + 400 bootstrap)
+- **Pool train/controller hiện tại:** **79.114 snapshot / 5s** (không phải 79k phiên) · **23.843** 5-tuple last-poll · **19 `scenario_id`** · **32 `run_id`** · DDoS **43.206** · Portscan **20.238** · Normal **15.670**
+- **Không dùng** `flow_stats.csv` 155k dump (nhãn portscan bẩn) và **không dùng** 20k Normal random.
+- ~38k DDoS lúc đầu là nhãn cửa sổ + leftover nmap — không phải số chính.
+- CICIDS2017 / InSDN chỉ đối chứng công khai, không train controller.
 
 ## A4. 10 đặc trưng
 
-`ip_proto, tp_src, tp_dst, packet_count, byte_count, duration_sec, packet_count_per_sec, byte_count_per_sec, packet_size_avg, flow_duration`
+Controller / random-split vẫn 10 cột: `ip_proto, tp_src, tp_dst, packet_count, byte_count, duration_sec, packet_count_per_sec, byte_count_per_sec, packet_size_avg, flow_duration`.
+
+Số generalization (LOSO) **bỏ `tp_src`/`tp_dst` thô** — model hay học dấu vết cách tạo traffic, không chỉ hành vi.
 
 ## A5. Tiền xử lý (thứ tự THẬT)
 
@@ -69,29 +70,32 @@ Scaler **không** nằm trong `preprocess.py`; nằm trong từng `train_*.py`.
 | **Isolation Forest** | Unsupervised | Binary Normal vs Anomaly | **Anomaly-class** | Unsupervised nhẹ |
 | **Autoencoder** | Unsupervised | Binary (MSE threshold) | **Anomaly-class** | Unsupervised học sâu |
 
-**Ngưỡng AE:** percentile 95 MSE trên **Normal-TRAIN** ≈ **0.0473** (không tính lại trên test).
+**Ngưỡng AE:** percentile 95 MSE trên Normal-TRAIN pool 79.114 ≈ **0.0014**.
 
 ## A7. Số liệu nhớ thuộc (làm tròn)
 
-| Model | Acc | P | R | F1 |
-|-------|-----|---|---|-----|
-| RF | 1.0000 | 1.0000 | 1.0000 | 1.0000 |
-| XGB | 0.9991 | 0.9997 | 0.9918 | 0.9957 |
-| AE | 0.9987 | 0.9986 | 1.0000 | 0.9993 |
-| IF | 0.9898 | 0.9973 | 0.9923 | 0.9947 |
+**Số chính — 4 model binary LOSO (Normal vs Attack), 19 scenario, 3 poll đầu, bỏ cổng:**
 
-**Latency inference (máy lab):** XGB ~**0.3 ms** · RF ~**15 ms** · IF ~4 ms · AE ~52 ms  
+| Model | Acc pooled | F1 anom | Recall scenario (min) | Normal FPR |
+|-------|------------|---------|------------------------|------------|
+| XGB | 0.919 | 0.954 | 0.907 (0.134) | 0.247 |
+| RF | 0.887 | 0.935 | 0.862 (0) | 0.192 |
+| AE | 0.083 | 0.007 | 0.102 (0) | 0.100 |
+| IF | 0.081 | 0.001 | 0.071 (0) | 0.101 |
+
+Pooled không đứng một mình. XGB/RF sót `portscan_nmap_h4_h1`. AE/IF baseline chết. Acc 0.9999 **cấm**.
+
+**Grouped-by-run (trung gian, còn overlap scenario):** RF Acc 0.987 ± 0.008 · XGB 0.982 ± 0.017.
 
 **Realtime:** poll **5 s**; block sau **3** alert liên tiếp → ~**≤15 s**; DROP `hard_timeout` **120 s**.
 
 **Real-only XGB/RF:** Acc holdout **1.0000** nhưng `n_ddos_real=6`.  
 **RF Real-only CV K=5:** Acc ≈ 0.9997±0.0004 · **F1_macro ≈ 0.8994±0.1343**.
 
-**Grouped run-isolated (lab SDN, đúng hướng đề tài):**
-- 20 run độc lập · 55.515 rows known-`run_id` · DDoS 43.206
-- RF: **Acc 0.9981 ± 0.0041 · F1_macro 0.9881 ± 0.0257 · DDoS recall ≈ 1.000**
-- XGB: **Acc 0.8505 ± 0.3339 · F1_macro 0.8756 ± 0.2646 · DDoS recall ≈ 1.000**
-- XGB lệch mạnh vì **fold 4** (test chủ yếu portscan) Acc chỉ **0.25**; RF vẫn ~0.99. Không nói “XGB vững tuyệt đối”.
+**LOSO binary realtime (số generalization 4 model):**
+- XGB F1-anom 0.954 · recall attack-scenario 0.907 (min 0.134) · Normal FPR 0.247
+- RF F1-anom 0.935 · 0.862 (min 0) · FPR 0.192
+- AE/IF Acc ~0.08 — không tô hồng.
 
 **Public CICIDS2017 3-class (bổ sung, không phải OpenFlow):**
 - 880.176 flows · Normal 662.383 · DDoS 127.175 · PortScan 90.618
@@ -202,10 +206,10 @@ Mỗi câu: **Ý trả lời ngắn** → **Câu nói miệng** → **Bẫy / đ
 **Nói:**  
 > XGB/RF: P/R/F1 **macro** (trung bình các lớp). AE/IF: P/R/F1 của lớp **Anomaly** (positive), Acc là overall binary. Không trộn hai kiểu.  
 
-### Q14. AE threshold 0.0473 lấy sao? Sao không 2.355?
+### Q14. AE threshold lấy sao? Sao không 2.355?
 
 **Nói:**  
-> 95th percentile MSE trên Normal **train** sau StandardScaler. 2.355 là số cũ/sai thang — không dùng. Threshold **không** tính trên test.  
+> 95th percentile MSE trên Normal **train** sau StandardScaler. Pool 79.114 hiện tại ≈ **0.0014**. Số 0.0473 là ngưỡng của bảng 11k cũ; 2.355 là sai thang. Threshold **không** tính trên test.  
 
 ### Q15. AE Recall Anomaly = 100% nghĩa là gì? Macro thì sao?
 
@@ -343,13 +347,13 @@ Mỗi câu: **Ý trả lời ngắn** → **Câu nói miệng** → **Bẫy / đ
 # C. CHEAT SHEET 60 GIÂY (trước vào phòng)
 
 1. Làm **hệ thống SDN+ML khép kín**, không invent algo.  
-2. Data **tự thu** Mininet; bảng cũ 6 DDoS + bootstrap; grouped mới ~**43k DDoS / 20 run**; CICIDS/InSDN chỉ đối chứng.  
+2. Data = **79.114 snapshot / 5s** (23.843 5-tuple · 19 scenario · 32 run). Không 231k. Không nói “79k phiên”.  
 3. SMOTE **train only** trong `preprocess.py`.  
 4. RF Acc=1.0 = **lab dễ tách**, không = production; xem CV F1-macro.  
 5. Deploy **XGB** vì **latency**.  
 6. Realtime = **`realtime_detector.py`**; monitor = thu CSV.  
-7. AE threshold **0.0473** trên Normal-train.  
-8. Hạn chế: Mininet; bootstrap trước split; XGB grouped gãy fold portscan; public ≠ OpenFlow.  
+7. AE threshold **≈ 0.0014** trên Normal-train pool 79k.  
+8. Số chính = binary LOSO: XGB F1-anom 0.954 · recall scenario 0.907 (min 0.13) · Normal FPR 0.25. AE/IF ~0.08. Acc 0.9999 cấm.  
 
 ---
 

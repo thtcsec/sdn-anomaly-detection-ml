@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 import logging
 import subprocess
 from datetime import datetime
@@ -18,7 +19,8 @@ CONFIG_PATH = os.path.join(BASE_DIR, 'dataset', 'controller_config.json')
 MODELS_DIR = os.path.join(BASE_DIR, 'models')
 UPTIME_START = datetime.now()
 
-DASHBOARD_HOST = os.environ.get('DASHBOARD_HOST', '127.0.0.1')
+# 0.0.0.0: Chrome trên Windows mới vào được khi Flask chạy trong WSL.
+DASHBOARD_HOST = os.environ.get('DASHBOARD_HOST', '0.0.0.0')
 DASHBOARD_PORT = int(os.environ.get('DASHBOARD_PORT', '5000'))
 
 DEFAULT_CONFIG = {
@@ -111,7 +113,7 @@ def get_live_state():
             'total_ips_blocked': len(all_blocked),
             'uptime_seconds': uptime_sec,
             'model_loaded': os.path.exists(os.path.join(MODELS_DIR, f"{cfg.get('selected_model', 'xgboost')}_model.pkl")),
-            'last_latency_ms': live.get('last_latency_ms', 0.32),
+            'last_latency_ms': live.get('last_latency_ms', 0.33),
             'last_alert_at': last_alert_at,
             'switches_count': len(live.get('active_switches', [1, 2]))
         },
@@ -205,18 +207,32 @@ def handle_simulation():
         target = body.get('target', '10.0.0.1')
 
         script_path = os.path.join(BASE_DIR, 'scripts', 'trigger_traffic.py')
+        if not os.path.isfile(script_path):
+            return jsonify({
+                'status': 'error',
+                'type': action_type,
+                'message': (
+                    'Thiếu scripts/trigger_traffic.py. '
+                    'Chạy traffic trong mininet>: '
+                    'h1 ping / h4 hping3 --flood / h6 nmap.'
+                )
+            }), 400
+
         cmd = [
-            'python3', script_path,
+            sys.executable, script_path,
             '--type', action_type,
             '--duration', str(duration),
             '--target', target
         ]
-
         subprocess.Popen(cmd)
         return jsonify({
             'status': 'ok',
             'type': action_type,
-            'message': f"Đang phát sinh luồng traffic: {action_type.upper()} ({duration}s)"
+            'message': (
+                f"Đã gọi trigger_traffic.py [{action_type.upper()}] ({duration}s). "
+                "Nếu Mininet chưa chạy thì không có traffic — "
+                "thesis/video nên gõ lệnh trong mininet>."
+            )
         })
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -260,10 +276,24 @@ def health():
     })
 
 
+def _reachable_ips():
+    ips = []
+    try:
+        out = subprocess.check_output(["hostname", "-I"], text=True, timeout=2)
+        ips = [x for x in out.split() if x and not x.startswith("127.")]
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return ips
+
+
 if __name__ == '__main__':
     print("=" * 60)
     print("  SDN Anomaly Detection & SOC Monitoring Dashboard")
-    print(f"  URL: http://{DASHBOARD_HOST}:{DASHBOARD_PORT}")
+    print(f"  Bind: {DASHBOARD_HOST}:{DASHBOARD_PORT}")
+    print(f"  Thu WSL:           http://127.0.0.1:{DASHBOARD_PORT}")
+    print(f"  Chrome (Windows):  http://127.0.0.1:{DASHBOARD_PORT}")
+    for ip in _reachable_ips():
+        print(f"  Neu localhost loi: http://{ip}:{DASHBOARD_PORT}")
     print("  (Terminal spam disabled for clean console output)")
     print("=" * 60)
     app.run(host=DASHBOARD_HOST, port=DASHBOARD_PORT, debug=False)

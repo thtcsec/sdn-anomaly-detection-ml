@@ -9,6 +9,9 @@ import logging
 import sys
 import os
 
+# os-ken 4.2 default hub=native: AppManager.run_apps() gọi t.kill() rồi chết.
+os.environ.setdefault("OSKEN_HUB_TYPE", "eventlet")
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from os_ken.base.app_manager import AppManager

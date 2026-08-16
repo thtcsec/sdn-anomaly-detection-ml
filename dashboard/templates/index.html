@@ -129,7 +129,7 @@
                 </div>
                 <div>
                     <h3 class="text-xs font-bold uppercase tracking-wider text-white">Mininet Traffic Simulation Control</h3>
-                    <p class="text-[11px] text-slate-400">Kích hoạt nhanh các kịch bản test để kiểm chứng AI & Auto-Mitigation</p>
+                    <p class="text-[11px] text-slate-400">Thesis/video: chạy lệnh trong <span class="font-mono text-cyan-300">mininet&gt;</span> (h1 ping / h4 hping3 / h6 nmap). Ba nút dưới chỉ gọi <span class="font-mono">scripts/trigger_traffic.py</span> khi Mininet đang chạy.</p>
                 </div>
             </div>
 
@@ -239,7 +239,7 @@
                     </div>
                 </div>
                 <div class="mt-3 flex items-baseline gap-2">
-                    <span class="text-3xl font-extrabold text-emerald-400 font-mono" id="stat-latency">0.32</span>
+                    <span class="text-3xl font-extrabold text-emerald-400 font-mono" id="stat-latency">0.33</span>
                     <span class="text-xs text-emerald-500/80 font-medium">ms / flow</span>
                 </div>
                 <div class="mt-2 flex items-center justify-between text-xs text-slate-400">
@@ -441,18 +441,18 @@
                         <label class="glass-card rounded-xl p-3 border border-cyber-border cursor-pointer flex items-start gap-2.5 hover:border-cyan-500/50 transition-colors">
                             <input type="radio" name="model-radio" value="xgboost" checked class="mt-1 accent-cyan-400">
                             <div>
-                                <div class="text-xs font-bold text-white">XGBoost (Đề xuất)</div>
-                                <div class="text-[10px] text-emerald-400 font-mono">Accuracy: 99.91%</div>
-                                <div class="text-[10px] text-slate-400 font-mono">Latency: ~0.32 ms</div>
+                                <div class="text-xs font-bold text-white">XGBoost - Realtime Prototype</div>
+                                <div class="text-[10px] text-slate-300">10-feature multiclass</div>
+                                <div class="text-[10px] text-slate-400 font-mono">Latency benchmark: ~0.33 ms/flow</div>
                             </div>
                         </label>
 
                         <label class="glass-card rounded-xl p-3 border border-cyber-border cursor-pointer flex items-start gap-2.5 hover:border-cyan-500/50 transition-colors">
                             <input type="radio" name="model-radio" value="random_forest" class="mt-1 accent-cyan-400">
                             <div>
-                                <div class="text-xs font-bold text-white">Random Forest</div>
-                                <div class="text-[10px] text-cyan-400 font-mono">Accuracy: 97.80%</div>
-                                <div class="text-[10px] text-slate-400 font-mono">Latency: ~14.2 ms</div>
+                                <div class="text-xs font-bold text-white">Random Forest - Optional Baseline</div>
+                                <div class="text-[10px] text-slate-300">10-feature multiclass</div>
+                                <div class="text-[10px] text-slate-400 font-mono">Latency benchmark: ~15.25 ms/flow</div>
                             </div>
                         </label>
                     </div>
@@ -755,7 +755,7 @@
                 document.getElementById('stat-flows').textContent = Number(data.stats.total_flows_analyzed || 0).toLocaleString();
                 document.getElementById('stat-attacks').textContent = Number(data.stats.total_attacks_detected || 0).toLocaleString();
                 document.getElementById('stat-blocked').textContent = Number(data.stats.total_ips_blocked || 0).toLocaleString();
-                document.getElementById('stat-latency').textContent = Number(data.stats.last_latency_ms || 0.32).toFixed(2);
+                document.getElementById('stat-latency').textContent = Number(data.stats.last_latency_ms || 0.33).toFixed(2);
                 document.getElementById('uptime-display').textContent = fmtUptime(data.stats.uptime_seconds);
 
                 // Config data sync
@@ -824,6 +824,9 @@
 
         setInterval(fetchLiveData, 1500);
         fetchLiveData();
+        if (new URLSearchParams(location.search).get('open_settings') === '1') {
+            openSettingsModal();
+        }
     </script>
 </body>
 </html>

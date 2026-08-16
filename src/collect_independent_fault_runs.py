@@ -42,6 +42,13 @@ RUNS_DIR = os.path.join(BASE_DIR, "dataset", "fault_runs")
 MANIFEST = os.path.join(RUNS_DIR, "manifest.csv")
 LOG_DIR = os.path.join(RUNS_DIR, "run_logs")
 
+def _hcmd(host, cmd: str) -> str:
+    """Mininet Node.cmd is not thread-safe."""
+    with _CMD_LOCK:
+        return host.cmd(cmd)
+
+
+_CMD_LOCK = threading.Lock()
 LAN = {f"10.0.0.{i}" for i in range(1, 7)}
 S1_NET = {f"10.0.0.{i}" for i in range(1, 4)}
 S2_NET = {f"10.0.0.{i}" for i in range(4, 7)}
@@ -152,10 +159,10 @@ def _parse_iperf_csv(text: str) -> tuple[Optional[float], Optional[float]]:
 
 
 def _start_servers(hosts: dict) -> None:
-    hosts["h4"].cmd("iperf -s >/dev/null 2>&1 &")
-    hosts["h4"].cmd("iperf -s -u -p 5002 >/dev/null 2>&1 &")
-    hosts["h4"].cmd("python3 -m http.server 8080 >/dev/null 2>&1 &")
-    hosts["h5"].cmd("iperf -s -p 5003 >/dev/null 2>&1 &")
+    _hcmd(hosts["h4"], "iperf -s >/dev/null 2>&1 &")
+    _hcmd(hosts["h4"], "iperf -s -u -p 5002 >/dev/null 2>&1 &")
+    _hcmd(hosts["h4"], "python3 -m http.server 8080 >/dev/null 2>&1 &")
+    _hcmd(hosts["h5"], "iperf -s -p 5003 >/dev/null 2>&1 &")
     time.sleep(1)
 
 
@@ -183,16 +190,17 @@ def _traffic(hosts: dict, kind: str, duration: int) -> None:
         )
     for hname, cmd in cmds:
         assert_no_default_route_hint(cmd)
-        hosts[hname].cmd(cmd)
+        _hcmd(hosts[hname], cmd)
 
 
 def _probe_loop(hosts: dict, samples: list, stop: threading.Event) -> None:
+    """Probe only from h6 so it does not share Mininet shells with traffic hosts."""
     while not stop.is_set():
         ts = _now()
-        ping_out = hosts["h1"].cmd("ping -c 4 -W 1 10.0.0.4")
+        ping_out = _hcmd(hosts["h6"], "ping -c 4 -W 1 10.0.0.1")
         parsed = _parse_ping(ping_out)
-        iperf_out = hosts["h6"].cmd("iperf -c 10.0.0.4 -t 2 -y C 2>/dev/null")
-        udp_out = hosts["h6"].cmd("iperf -u -c 10.0.0.4 -p 5002 -t 2 -b 1M -y C 2>/dev/null")
+        iperf_out = _hcmd(hosts["h6"], "iperf -c 10.0.0.4 -t 2 -y C 2>/dev/null")
+        udp_out = _hcmd(hosts["h6"], "iperf -u -c 10.0.0.4 -p 5002 -t 2 -b 1M -y C 2>/dev/null")
         thr, _ = _parse_iperf_csv(iperf_out)
         _, jitter = _parse_iperf_csv(udp_out)
         samples.append({
@@ -316,14 +324,17 @@ def main() -> None:
             print(f"\n[*] {sc['scenario_id']} r{repeat_idx} | {run_id} | {sc['fault_label']}")
             probes: list[dict] = []
             stop = threading.Event()
+            _traffic(hosts, sc["traffic"], sc["duration_sec"])
             th = threading.Thread(target=_probe_loop, args=(hosts, probes, stop), daemon=True)
             th.start()
-            _traffic(hosts, sc["traffic"], sc["duration_sec"])
             time.sleep(int(sc["duration_sec"]))
             stop.set()
-            th.join(timeout=8)
+            th.join(timeout=12)
             for h in hosts.values():
-                h.cmd("killall ping iperf wget 2>/dev/null")
+                try:
+                    _hcmd(h, "killall ping iperf wget 2>/dev/null")
+                except Exception:
+                    pass
             time.sleep(8)
             end = _now()
             clear_core_qos(link)
@@ -371,7 +382,11 @@ def main() -> None:
             clear_core_qos(link)
         except Exception:
             pass
-        net.stop()
+        try:
+            net.stop()
+        except Exception as exc:
+            print(f"[!] net.stop: {exc}")
+            os.system("mn -c >/dev/null 2>&1")
     print("[✓] Fault collection finished — merge: python src/merge_fault_runs.py")
 
 

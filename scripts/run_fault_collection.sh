@@ -44,7 +44,7 @@ fi
 
 echo "[*] collect 12x3"
 export PYTHONPATH=/usr/lib/python3/dist-packages:${PYTHONPATH:-}
-/usr/bin/python3 "$ROOT/src/collect_independent_fault_runs.py" "$@"
+"$ROOT/.venv/bin/python" "$ROOT/src/collect_independent_fault_runs.py" "$@"
 echo "[*] merge"
 "$ROOT/.venv/bin/python" "$ROOT/src/merge_fault_runs.py"
 echo "[*] eval LOSO"

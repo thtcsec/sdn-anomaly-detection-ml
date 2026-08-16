@@ -272,8 +272,13 @@ def main() -> None:
     if os.geteuid() != 0:
         print("[!] sudo required")
         sys.exit(1)
-    if not os.path.exists(FLOW_LIVE):
+    for _ in range(30):
+        if os.path.exists(FLOW_LIVE):
+            break
+        time.sleep(1)
+    else:
         print("[!] Start T1 first: python controller/run_fault_monitor.py")
+        print(f"    waiting for {FLOW_LIVE}")
         sys.exit(1)
 
     from mininet.log import setLogLevel

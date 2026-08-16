@@ -21,13 +21,25 @@ echo "[*] start fault_monitor"
 mkdir -p "$ROOT/tmp" "$ROOT/dataset/fault_live"
 # shellcheck disable=SC1091
 source "$ROOT/.venv/bin/activate"
+export PYTHONUNBUFFERED=1
 nohup python "$ROOT/controller/run_fault_monitor.py" \
   > "$ROOT/tmp/fault_monitor.log" 2>&1 &
 echo $! > "$ROOT/tmp/fault_monitor.pid"
-sleep 6
-if ! grep -q 'Listening OpenFlow\|Fault monitor\|tcp:6633' "$ROOT/tmp/fault_monitor.log"; then
-  echo "[!] monitor did not print ready banner; tail:"
-  tail -30 "$ROOT/tmp/fault_monitor.log" || true
+for i in $(seq 1 40); do
+  if grep -q 'tcp:6633\|Fault monitor\|writing' "$ROOT/tmp/fault_monitor.log" 2>/dev/null; then
+    echo "[✓] monitor ready ($i s)"
+    break
+  fi
+  if [ -f "$ROOT/dataset/fault_live/flow_polls.csv" ]; then
+    echo "[✓] flow_polls.csv exists ($i s)"
+    break
+  fi
+  sleep 1
+done
+if ! ss -lntp 2>/dev/null | grep -q ':6633'; then
+  echo "[!] :6633 not listening; log:"
+  tail -40 "$ROOT/tmp/fault_monitor.log" || true
+  exit 1
 fi
 
 echo "[*] collect 12x3"

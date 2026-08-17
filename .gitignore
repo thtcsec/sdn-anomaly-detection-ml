@@ -27,6 +27,12 @@ dist/
 dataset/public_benchmark/
 models/public_benchmark/
 
+# Demo / collection runtime (do not commit)
+dataset/controller.pid
+dataset/fault_live/
+dataset/fault_runs/
+tmp/
+
 
 # Thesis / doc tooling junk
 pipeline_run_output*.txt

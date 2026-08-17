@@ -98,13 +98,14 @@
             <!-- Header Quick Stats & Setting Button -->
             <div class="flex flex-wrap items-center gap-3 text-xs">
                 <div class="px-3 py-1.5 rounded-lg bg-cyber-800/80 border border-cyber-border flex items-center gap-2">
-                    <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span id="controller-led" class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
                     <span class="text-slate-400">Controller:</span>
-                    <span class="font-semibold text-emerald-400" id="controller-status">CONNECTED (2 SW)</span>
+                    <span class="font-semibold text-emerald-400" id="controller-status">CHECKING…</span>
                 </div>
                 <div class="px-3 py-1.5 rounded-lg bg-cyber-800/80 border border-cyber-border flex items-center gap-2">
                     <span class="text-slate-400">Model:</span>
                     <span class="font-semibold text-cyan-400 uppercase font-mono" id="active-model-badge">XGBoost</span>
+                    <span id="model-load-chip" class="hidden text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 font-mono">LOADING</span>
                 </div>
                 <div class="px-3 py-1.5 rounded-lg bg-cyber-800/80 border border-cyber-border flex items-center gap-2">
                     <span class="text-slate-400">Uptime:</span>
@@ -119,6 +120,16 @@
             </div>
         </div>
     </header>
+
+    <div id="model-load-banner" class="max-w-7xl mx-auto mb-4 hidden">
+        <div class="rounded-xl border border-amber-500/40 bg-amber-950/50 px-4 py-2.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <div class="flex items-center gap-2 text-amber-100 text-xs font-semibold">
+                <span class="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
+                <span id="model-load-banner-text">Đang nạp model…</span>
+            </div>
+            <span id="model-load-banner-eta" class="font-mono text-[11px] text-amber-300">0s</span>
+        </div>
+    </div>
 
     <!-- ATTACK SIMULATION & QUICK CONTROL BAR -->
     <div class="max-w-7xl mx-auto mb-6">
@@ -206,7 +217,7 @@
                 </div>
                 <div class="mt-2 flex items-center justify-between text-xs text-slate-400">
                     <span>Phân loại:</span>
-                    <span class="text-slate-300 font-medium" id="stat-attack-types">DDoS & Portscan</span>
+                    <span class="text-slate-300 font-medium" id="stat-attack-types">DDoS / Portscan / Anomaly</span>
                 </div>
                 <div class="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-rose-500 to-transparent"></div>
             </div>
@@ -239,13 +250,14 @@
                     </div>
                 </div>
                 <div class="mt-3 flex items-baseline gap-2">
-                    <span class="text-3xl font-extrabold text-emerald-400 font-mono" id="stat-latency">0.33</span>
+                    <span class="text-3xl font-extrabold text-emerald-400 font-mono" id="stat-latency">0.00</span>
                     <span class="text-xs text-emerald-500/80 font-medium">ms / flow</span>
                 </div>
                 <div class="mt-2 flex items-center justify-between text-xs text-slate-400">
                     <span>Model hiện tại:</span>
                     <span class="text-emerald-400 font-medium font-mono uppercase" id="stat-model-name">XGBOOST</span>
                 </div>
+                <div class="mt-1 text-[10px] text-slate-500 font-mono" id="stat-model-task">multiclass</div>
                 <div class="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-emerald-500 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
             </div>
 
@@ -290,14 +302,15 @@
                                     <th class="pb-2.5 pl-2">Time</th>
                                     <th class="pb-2.5">Flow Match (Src → Dst:Port)</th>
                                     <th class="pb-2.5">Proto</th>
-                                    <th class="pb-2.5">Packet Rate</th>
+                                    <th class="pb-2.5">Δ Packet Rate</th>
                                     <th class="pb-2.5">ML Classification</th>
+                                    <th class="pb-2.5">Model</th>
                                     <th class="pb-2.5 pr-2 text-right">Defense Action</th>
                                 </tr>
                             </thead>
                             <tbody id="flow-table-body" class="divide-y divide-cyber-border/40 text-slate-300">
                                 <tr>
-                                    <td colspan="6" class="py-8 text-center text-slate-500 font-sans">
+                                    <td colspan="7" class="py-8 text-center text-slate-500 font-sans">
                                         <div class="flex flex-col items-center justify-center gap-2">
                                             <svg class="w-8 h-8 text-slate-600 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg>
                                             <span>Waiting for OpenFlow stats from switches...</span>
@@ -342,7 +355,7 @@
                         <canvas id="donutChart"></canvas>
                     </div>
 
-                    <div class="grid grid-cols-3 gap-2 text-center mt-3 pt-3 border-t border-cyber-border text-xs font-mono">
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center mt-3 pt-3 border-t border-cyber-border text-xs font-mono">
                         <div>
                             <div class="text-[10px] text-emerald-400 font-semibold uppercase">Normal</div>
                             <div class="font-bold text-white text-sm" id="dist-normal">0</div>
@@ -354,6 +367,10 @@
                         <div>
                             <div class="text-[10px] text-amber-400 font-semibold uppercase">Portscan</div>
                             <div class="font-bold text-amber-400 text-sm" id="dist-portscan">0</div>
+                        </div>
+                        <div>
+                            <div class="text-[10px] text-violet-400 font-semibold uppercase">Anomaly</div>
+                            <div class="font-bold text-violet-400 text-sm" id="dist-anomaly">0</div>
                         </div>
                     </div>
                 </div>
@@ -383,7 +400,7 @@
 
     <!-- SETTINGS MODAL -->
     <div id="settings-modal" class="fixed inset-0 z-50 bg-black/70 backdrop-blur-md hidden flex items-center justify-center p-4">
-        <div class="glass-card rounded-2xl max-w-lg w-full p-6 border border-cyan-500/40 shadow-2xl shadow-cyan-500/20 transform transition-all">
+        <div class="glass-card rounded-2xl max-w-2xl w-full p-6 border border-cyan-500/40 shadow-2xl shadow-cyan-500/20 transform transition-all max-h-[90vh] overflow-y-auto">
             <div class="flex items-center justify-between pb-4 border-b border-cyber-border">
                 <div class="flex items-center gap-2.5">
                     <div class="w-8 h-8 rounded-lg bg-cyan-500/10 text-cyan-400 flex items-center justify-center">
@@ -436,26 +453,46 @@
 
                 <!-- Active Model Selection -->
                 <div>
-                    <label class="text-xs font-semibold text-slate-300 block mb-2">Mô hình AI phát hiện bất thường:</label>
-                    <div class="grid grid-cols-2 gap-3">
-                        <label class="glass-card rounded-xl p-3 border border-cyber-border cursor-pointer flex items-start gap-2.5 hover:border-cyan-500/50 transition-colors">
+                    <label class="text-xs font-semibold text-slate-300 block mb-2">Mô hình phát hiện (artifact trong models/):</label>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <label class="model-card glass-card rounded-xl p-3 border border-cyber-border cursor-pointer flex items-start gap-2.5 hover:border-cyan-500/50 transition-colors">
                             <input type="radio" name="model-radio" value="xgboost" checked class="mt-1 accent-cyan-400">
                             <div>
-                                <div class="text-xs font-bold text-white">XGBoost - Realtime Prototype</div>
-                                <div class="text-[10px] text-slate-300">10-feature multiclass</div>
-                                <div class="text-[10px] text-slate-400 font-mono">Latency benchmark: ~0.33 ms/flow</div>
+                                <div class="text-xs font-bold text-white">XGBoost</div>
+                                <div class="text-[10px] text-slate-300">3 lớp: DDoS / Normal / Portscan</div>
+                                <div class="text-[10px] text-slate-400 font-mono">xgboost_model.pkl · ~0.33 ms/flow (benchmark)</div>
                             </div>
                         </label>
 
-                        <label class="glass-card rounded-xl p-3 border border-cyber-border cursor-pointer flex items-start gap-2.5 hover:border-cyan-500/50 transition-colors">
+                        <label class="model-card glass-card rounded-xl p-3 border border-cyber-border cursor-pointer flex items-start gap-2.5 hover:border-cyan-500/50 transition-colors">
                             <input type="radio" name="model-radio" value="random_forest" class="mt-1 accent-cyan-400">
                             <div>
-                                <div class="text-xs font-bold text-white">Random Forest - Optional Baseline</div>
-                                <div class="text-[10px] text-slate-300">10-feature multiclass</div>
-                                <div class="text-[10px] text-slate-400 font-mono">Latency benchmark: ~15.25 ms/flow</div>
+                                <div class="text-xs font-bold text-white">Random Forest</div>
+                                <div class="text-[10px] text-slate-300">3 lớp: DDoS / Normal / Portscan</div>
+                                <div class="text-[10px] text-slate-400 font-mono">random_forest_model.pkl · ~15.25 ms/flow (benchmark)</div>
+                            </div>
+                        </label>
+
+                        <label class="model-card glass-card rounded-xl p-3 border border-cyber-border cursor-pointer flex items-start gap-2.5 hover:border-violet-500/50 transition-colors">
+                            <input type="radio" name="model-radio" value="isolation_forest" class="mt-1 accent-violet-400">
+                            <div>
+                                <div class="text-xs font-bold text-white">Isolation Forest</div>
+                                <div class="text-[10px] text-violet-300">Nhị phân: Normal / Anomaly (sklearn −1 = outlier)</div>
+                                <div class="text-[10px] text-slate-400">Không suy ra DDoS vs Portscan. LOSO binary realtime thất bại — output vẫn là predict() thật.</div>
+                            </div>
+                        </label>
+
+                        <label class="model-card glass-card rounded-xl p-3 border border-cyber-border cursor-pointer flex items-start gap-2.5 hover:border-violet-500/50 transition-colors">
+                            <input type="radio" name="model-radio" value="autoencoder" class="mt-1 accent-violet-400">
+                            <div>
+                                <div class="text-xs font-bold text-white">Autoencoder</div>
+                                <div class="text-[10px] text-violet-300">Nhị phân: MSE &gt; threshold đã lưu (Normal-train p95)</div>
+                                <div class="text-[10px] text-slate-400">Không suy ra DDoS vs Portscan. Nạp TensorFlow lần đầu 30–180s (timeout 180s), không phải treo.</div>
                             </div>
                         </label>
                     </div>
+                    <p class="text-[11px] text-amber-400/90 mt-2">Nếu Auto-Mitigation bật, nhãn ANOMALY cũng kích hoạt DROP như tấn công — dashboard không bịa loại tấn công.</p>
+                    <p id="model-availability-note" class="text-[11px] text-rose-400 mt-1 hidden"></p>
                 </div>
 
                 <!-- Auto-Mitigation Switch -->
@@ -535,10 +572,10 @@
                     body: JSON.stringify({ type: type, duration: duration, target: '10.0.0.1' })
                 });
                 const data = await res.json();
-                if (data.status === 'ok') {
+                if (res.ok && data.status === 'ok') {
                     showToast(data.message, 'success');
                 } else {
-                    showToast(`Lỗi: ${data.message}`, 'danger');
+                    showToast(data.message || 'Không bắn được traffic', 'danger');
                 }
             } catch (err) {
                 showToast(`Lỗi kết nối: ${err}`, 'danger');
@@ -580,12 +617,15 @@
                     })
                 });
                 const data = await res.json();
-                if (data.status === 'ok') {
-                    showToast(data.message, 'success');
+                if (res.ok && data.status === 'ok') {
+                    showToast(
+                        data.message + ' Header đổi sau ~1 poll khi log hiện NOW PREDICTING WITH ' + model.toUpperCase() + '.',
+                        'success'
+                    );
                     closeSettingsModal();
                     fetchLiveData();
                 } else {
-                    showToast(`Lỗi: ${data.message}`, 'danger');
+                    showToast(data.message || 'Không lưu được cấu hình', 'danger');
                 }
             } catch (err) {
                 showToast(`Lỗi lưu cấu hình: ${err}`, 'danger');
@@ -639,10 +679,10 @@
         const donutChart = new Chart(ctxDonut, {
             type: 'doughnut',
             data: {
-                labels: ['Normal', 'DDoS', 'Portscan'],
+                labels: ['Normal', 'DDoS', 'Portscan', 'Anomaly'],
                 datasets: [{
-                    data: [1, 0, 0],
-                    backgroundColor: ['#00f59b', '#ff3366', '#ff9900'],
+                    data: [1, 0, 0, 0],
+                    backgroundColor: ['#00f59b', '#ff3366', '#ff9900', '#a78bfa'],
                     borderWidth: 0,
                     hoverOffset: 4
                 }]
@@ -704,6 +744,10 @@
                     labelBadge = `<span class="px-2 py-0.5 rounded bg-rose-500/20 text-rose-400 border border-rose-500/30 text-[10px] font-bold">DDOS ATTACK</span>`;
                 } else if (f.prediction === 'PORTSCAN') {
                     labelBadge = `<span class="px-2 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30 text-[10px] font-bold">PORTSCAN</span>`;
+                } else if (f.prediction === 'ANOMALY') {
+                    labelBadge = `<span class="px-2 py-0.5 rounded bg-violet-500/20 text-violet-300 border border-violet-500/30 text-[10px] font-bold">ANOMALY</span>`;
+                } else if (f.prediction && f.prediction !== 'NORMAL') {
+                    labelBadge = `<span class="px-2 py-0.5 rounded bg-slate-500/20 text-slate-300 border border-slate-500/30 text-[10px] font-bold">${f.prediction}</span>`;
                 }
 
                 if (f.blocked) {
@@ -717,8 +761,9 @@
                         <td class="py-2.5 pl-2 text-slate-400 text-[11px]">${f.timestamp ? f.timestamp.split(' ')[1] : '--:--:--'}</td>
                         <td class="py-2.5 font-semibold text-white">${f.ip_src} <span class="text-slate-500">→</span> ${f.ip_dst}:${f.tp_dst || 'any'}</td>
                         <td class="py-2.5"><span class="px-1.5 py-0.5 rounded bg-cyber-700 text-slate-300 text-[10px]">${protoName}</span></td>
-                        <td class="py-2.5 text-cyan-400 font-semibold">${Number(f.packet_count_per_sec || 0).toLocaleString()} p/s</td>
+                        <td class="py-2.5 text-cyan-400 font-semibold">${Number((f.packet_delta_per_sec != null) ? f.packet_delta_per_sec : (f.packet_count_per_sec || 0)).toLocaleString()} p/s</td>
                         <td class="py-2.5">${labelBadge}</td>
+                        <td class="py-2.5 text-[10px] text-cyan-300/80 uppercase">${f.model || '—'}</td>
                         <td class="py-2.5 pr-2 text-right">${actionBadge}</td>
                     </tr>
                 `;
@@ -743,6 +788,33 @@
             `).join('');
         }
 
+        function applyModelAvailability(available) {
+            const note = document.getElementById('model-availability-note');
+            if (!available) return;
+            const missingNames = [];
+            document.querySelectorAll('input[name="model-radio"]').forEach(r => {
+                const info = available[r.value] || {};
+                const ok = !!info.available;
+                r.disabled = !ok;
+                const card = r.closest('label');
+                if (card) {
+                    card.classList.toggle('opacity-40', !ok);
+                    card.classList.toggle('pointer-events-none', !ok);
+                    card.title = ok ? '' : ('Thiếu file: ' + (info.missing || []).join(', '));
+                }
+                if (!ok) missingNames.push(r.value + ' (' + (info.missing || []).join(', ') + ')');
+            });
+            if (note) {
+                if (missingNames.length) {
+                    note.textContent = 'Chưa có artifact — radio bị khóa: ' + missingNames.join(' · ');
+                    note.classList.remove('hidden');
+                } else {
+                    note.textContent = '';
+                    note.classList.add('hidden');
+                }
+            }
+        }
+
         let initializedSettings = false;
 
         async function fetchLiveData() {
@@ -751,20 +823,112 @@
                 if (!res.ok) throw new Error('API offline');
                 const data = await res.json();
 
-                // Stats
+                applyModelAvailability(data.available_models);
+
+                const alive = data.stats.controller_alive !== false;
+                const swCount = Number(data.stats.switches_count || 0);
+                const ctrl = document.getElementById('controller-status');
+                const led = document.getElementById('controller-led');
+                const liveInd = document.getElementById('live-indicator');
+                if (ctrl) {
+                    if (!alive) {
+                        ctrl.textContent = 'CONTROLLER STOPPED';
+                        ctrl.classList.add('text-rose-400');
+                        ctrl.classList.remove('text-emerald-400');
+                        if (led) {
+                            led.classList.remove('bg-emerald-400', 'animate-pulse');
+                            led.classList.add('bg-rose-500');
+                        }
+                        if (liveInd) liveInd.textContent = '● Controller stopped';
+                    } else {
+                        ctrl.textContent = swCount > 0 ? `CONNECTED (${swCount} SW)` : 'NO SWITCH';
+                        ctrl.classList.toggle('text-emerald-400', swCount > 0);
+                        ctrl.classList.toggle('text-rose-400', swCount === 0);
+                        if (led) {
+                            led.classList.toggle('bg-emerald-400', swCount > 0);
+                            led.classList.toggle('bg-amber-400', swCount === 0);
+                            led.classList.remove('bg-rose-500');
+                            led.classList.add('animate-pulse');
+                        }
+                        if (liveInd) liveInd.textContent = '● Realtime Sync';
+                    }
+                }
+
                 document.getElementById('stat-flows').textContent = Number(data.stats.total_flows_analyzed || 0).toLocaleString();
                 document.getElementById('stat-attacks').textContent = Number(data.stats.total_attacks_detected || 0).toLocaleString();
                 document.getElementById('stat-blocked').textContent = Number(data.stats.total_ips_blocked || 0).toLocaleString();
-                document.getElementById('stat-latency').textContent = Number(data.stats.last_latency_ms || 0.33).toFixed(2);
+                document.getElementById('stat-latency').textContent = Number(data.stats.last_latency_ms || 0).toFixed(2);
                 document.getElementById('uptime-display').textContent = fmtUptime(data.stats.uptime_seconds);
 
-                // Config data sync
+                const loadStatusEarly = data.stats.model_load_status || 'idle';
+                const runtime = (data.stats.runtime_model
+                    || (loadStatusEarly === 'loading' ? 'loading' : ((data.config && data.config.selected_model) || 'xgboost')));
+                const task = data.stats.model_task || '';
+                document.getElementById('active-model-badge').textContent = String(runtime).toUpperCase();
+                document.getElementById('stat-model-name').textContent = String(runtime).toUpperCase();
+                const taskEl = document.getElementById('stat-model-task');
+                if (taskEl) {
+                    taskEl.textContent = task === 'binary_anomaly'
+                        ? 'binary Normal/Anomaly'
+                        : (task === 'multiclass' ? 'multiclass DDoS/Normal/Portscan' : (task || ''));
+                }
+                const typesEl = document.getElementById('stat-attack-types');
+                if (typesEl) {
+                    typesEl.textContent = task === 'binary_anomaly' ? 'ANOMALY (không tách DDoS/scan)' : 'DDoS / Portscan (3-class)';
+                }
+                const headerDesc = document.getElementById('header-model-desc');
+                if (headerDesc) {
+                    const art = data.stats.model_artifact ? (' · ' + data.stats.model_artifact) : '';
+                    headerDesc.textContent = String(runtime).toUpperCase() + art;
+                }
+                const loadStatus = data.stats.model_load_status || 'idle';
+                const loadTarget = String(data.stats.model_load_target || '').toUpperCase();
+                const loadElapsed = Number(data.stats.model_load_elapsed_sec || 0);
+                const loadTimeout = Number(data.stats.model_load_timeout_sec || 0);
+                const loadMsg = data.stats.model_load_message || '';
+                const banner = document.getElementById('model-load-banner');
+                const bannerText = document.getElementById('model-load-banner-text');
+                const bannerEta = document.getElementById('model-load-banner-eta');
+                const chip = document.getElementById('model-load-chip');
+                if (loadStatus === 'loading') {
+                    if (banner) banner.classList.remove('hidden');
+                    if (bannerText) bannerText.textContent = loadMsg || ('Đang nạp ' + loadTarget + ' — OpenFlow vẫn chạy, giữ model cũ đến khi xong.');
+                    if (bannerEta) bannerEta.textContent = Math.round(loadElapsed) + '/' + Math.round(loadTimeout) + 's';
+                    if (chip) {
+                        chip.classList.remove('hidden');
+                        chip.textContent = 'LOADING ' + loadTarget + ' ' + Math.round(loadElapsed) + 's';
+                    }
+                } else if (loadStatus === 'timeout' || loadStatus === 'error' || loadStatus === 'cooldown') {
+                    if (banner) banner.classList.remove('hidden');
+                    if (bannerText) bannerText.textContent = loadMsg || (loadStatus + ' ' + loadTarget);
+                    if (bannerEta) bannerEta.textContent = loadStatus.toUpperCase();
+                    if (chip) {
+                        chip.classList.remove('hidden');
+                        chip.textContent = loadStatus.toUpperCase();
+                    }
+                } else {
+                    if (banner) banner.classList.add('hidden');
+                    if (chip) chip.classList.add('hidden');
+                }
+
+                const reqModel = (data.stats.requested_model || (data.config && data.config.selected_model) || '').toLowerCase();
+                const runModel = String(runtime).toLowerCase();
+                const mismatch = document.getElementById('model-availability-note');
+                if (mismatch) {
+                    if (loadStatus === 'loading') {
+                        mismatch.textContent = 'Đang nạp ' + (loadTarget || reqModel) + ' — chưa predict bằng model mới.';
+                        mismatch.classList.remove('hidden');
+                    } else if (reqModel && runModel && reqModel !== runModel) {
+                        mismatch.textContent = 'Settings đã chọn ' + reqModel + ' nhưng controller đang chạy ' + runModel + ' (nạp fail/timeout). Không dùng nhãn giả.';
+                        mismatch.classList.remove('hidden');
+                    } else {
+                        mismatch.textContent = '';
+                        mismatch.classList.add('hidden');
+                    }
+                }
+
                 if (data.config) {
                     const cfg = data.config;
-                    document.getElementById('stat-polling-display').textContent = parseFloat(cfg.polling_interval || 5.0).toFixed(1) + 's';
-                    document.getElementById('stat-timeout-display').textContent = (cfg.block_timeout || 120) + 's (Auto-Release)';
-                    document.getElementById('active-model-badge').textContent = (cfg.selected_model || 'xgboost').toUpperCase();
-                    document.getElementById('stat-model-name').textContent = (cfg.selected_model || 'xgboost').toUpperCase();
 
                     if (!initializedSettings) {
                         document.getElementById('input-polling').value = cfg.polling_interval || 5.0;
@@ -781,18 +945,20 @@
                         });
                         initializedSettings = true;
                     }
+                    document.getElementById('stat-polling-display').textContent = parseFloat(cfg.polling_interval || 5.0).toFixed(1) + 's';
+                    document.getElementById('stat-timeout-display').textContent = (cfg.block_timeout || 120) + 's (Auto-Release)';
                 }
 
-                // Update Chart with latest aggregate throughput (peak / sum of active flows)
                 let currentPps = 0;
-                if (data.recent_flows && data.recent_flows.length) {
-                    // Sum PPS of flows in the latest time slice
+                if (alive && data.recent_flows && data.recent_flows.length) {
                     const latestTime = data.recent_flows[data.recent_flows.length - 1].timestamp;
                     const latestSlice = data.recent_flows.filter(f => f.timestamp === latestTime);
-                    currentPps = latestSlice.reduce((acc, f) => acc + (f.packet_count_per_sec || 0), 0);
-                    if (currentPps === 0 && data.recent_flows[data.recent_flows.length - 1].packet_count_per_sec) {
-                        currentPps = data.recent_flows[data.recent_flows.length - 1].packet_count_per_sec;
-                    }
+                    currentPps = latestSlice.reduce((acc, f) => {
+                        const n = (f.packet_delta_per_sec != null)
+                            ? Number(f.packet_delta_per_sec)
+                            : Number(f.packet_count_per_sec || 0);
+                        return acc + (n || 0);
+                    }, 0);
                 }
                 
                 document.getElementById('current-pps').textContent = Math.round(currentPps).toLocaleString();
@@ -800,19 +966,22 @@
                 trafficDataPoints.push(Math.round(currentPps));
                 trafficChart.update('none');
 
-                // Update Donut
-                const norm = data.traffic_distribution.NORMAL || 0;
-                const ddos = data.traffic_distribution.DDOS || 0;
-                const port = data.traffic_distribution.PORTSCAN || 0;
+                const dist = data.traffic_distribution || {};
+                const norm = dist.NORMAL || 0;
+                const ddos = dist.DDOS || 0;
+                const port = dist.PORTSCAN || 0;
+                const anom = dist.ANOMALY || 0;
 
                 document.getElementById('dist-normal').textContent = norm.toLocaleString();
                 document.getElementById('dist-ddos').textContent = ddos.toLocaleString();
                 document.getElementById('dist-portscan').textContent = port.toLocaleString();
+                const distAnom = document.getElementById('dist-anomaly');
+                if (distAnom) distAnom.textContent = anom.toLocaleString();
 
-                donutChart.data.datasets[0].data = [norm || 1, ddos, port];
+                const allZero = !(norm || ddos || port || anom);
+                donutChart.data.datasets[0].data = allZero ? [1, 0, 0, 0] : [norm, ddos, port, anom];
                 donutChart.update('none');
 
-                // Render Table, Topology & Blocklist
                 renderFlowTable(data.recent_flows);
                 renderTopology(data.hosts);
                 renderBlockedList(data.blocked_ips, data.config ? data.config.block_timeout : 120);

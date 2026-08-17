@@ -43,18 +43,14 @@ def trigger_normal(duration=10):
     
     h1_pid = pids.get('h1')
     h2_pid = pids.get('h2')
-    h3_pid = pids.get('h3')
 
     print(f"[*] Bắt đầu sinh Normal Traffic ({duration}s)...")
     if h2_pid:
-        run_in_host(h2_pid, "iperf -s -p 5001", bg=True)
-    if h3_pid:
-        run_in_host(h3_pid, "python3 -m http.server 8000", bg=True)
-    
+        run_in_host(h2_pid, f"timeout {duration + 3} iperf -s -p 5001", bg=True)
+
     time.sleep(0.5)
     if h1_pid:
-        # ping liên tục và curl nhẹ
-        run_in_host(h1_pid, f"ping -c {duration * 2} -i 0.5 10.0.0.2", bg=True)
+        run_in_host(h1_pid, f"ping -c {max(4, duration)} -i 0.4 10.0.0.2", bg=True)
         run_in_host(h1_pid, f"iperf -c 10.0.0.2 -p 5001 -t {duration}", bg=True)
     
     return True
@@ -93,10 +89,28 @@ def trigger_portscan(target_ip='10.0.0.1', duration=10):
 
 def stop_all_traffic():
     print("[*] Dừng tất cả traffic simulation...")
+    names = ["hping3", "nmap", "iperf", "iperf3", "ping"]
+    for name in names:
+        try:
+            subprocess.run(["killall", "-9", name], capture_output=True)
+        except Exception:
+            pass
     try:
-        subprocess.run(["killall", "-9", "hping3", "nmap", "iperf"], capture_output=True)
+        subprocess.run(["pkill", "-9", "-f", "http.server"], capture_output=True)
     except Exception:
         pass
+    for pid in get_mininet_host_pids().values():
+        try:
+            subprocess.run(
+                ["mnexec", "-a", str(pid), "killall", "-9",
+                 "hping3", "nmap", "iperf", "iperf3", "ping"],
+                capture_output=True,
+            )
+        except Exception:
+            pass
+    print("[✓] Đã gửi SIGKILL tới ping/iperf/hping3/nmap trong host Mininet.")
+    print("[*] Đồ thị SOC dùng packet tăng thêm mỗi poll — hết gói thì p/s về 0, "
+          "không phải tổng lifetime của flow còn trong OVS.")
     return True
 
 if __name__ == '__main__':

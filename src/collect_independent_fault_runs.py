@@ -7,7 +7,8 @@ không phải feature.
 T1: python controller/run_fault_monitor.py
 T2: sudo PYTHONPATH=/usr/lib/python3/dist-packages python3 src/collect_independent_fault_runs.py
 
-Mặc định: 12 scenario × 3 run = 36 run. Không ghi dataset/flow_stats.csv.
+  --protocol legacy   12 scenario × 3 run (bộ 392 snapshot cũ)
+  --protocol d        Protocol D: nhiều mức severity × workload, duration dài hơn
 """
 
 from __future__ import annotations
@@ -66,30 +67,32 @@ def _now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
-def _scenarios(duration_sec: int) -> list[dict[str, Any]]:
-    """12 scenarios. configured_* are ground truth, never model features."""
+TRAFFIC_PAIRS = (
+    ("h1", "10.0.0.4"),
+    ("h2", "10.0.0.5"),
+    ("h3", "10.0.0.6"),
+)
+
+
+def _scenarios_legacy(duration_sec: int) -> list[dict[str, Any]]:
+    """Original 12 scenarios (392-snapshot collection)."""
     base = dict(duration_sec=duration_sec, affected_link=FAULT_AFFECTED_LINK)
     specs = [
-        ("N1", "normal", "normal", "ping_http", None, None, None),
-        ("N2", "normal", "normal", "iperf_tcp", None, None, None),
-        ("N3", "normal", "normal", "mixed", None, None, None),
-        ("B1", "bandwidth", "bandwidth", "50Mbit", 50.0, None, None),
-        ("B2", "bandwidth", "bandwidth", "20Mbit", 20.0, None, None),
-        ("B3", "bandwidth", "bandwidth", "10Mbit", 10.0, None, None),
-        ("L1", "loss", "loss", "1pct", None, 1.0, None),
-        ("L2", "loss", "loss", "5pct", None, 5.0, None),
-        ("L3", "loss", "loss", "10pct", None, 10.0, None),
-        ("D1", "delay", "delay", "20ms", None, None, "20ms"),
-        ("D2", "delay", "delay", "50ms", None, None, "50ms"),
-        ("D3", "delay", "delay", "100ms", None, None, "100ms"),
+        ("N1", "normal", "normal", "ping_http", None, None, None, "ping_http"),
+        ("N2", "normal", "normal", "iperf_tcp", None, None, None, "iperf_tcp"),
+        ("N3", "normal", "normal", "mixed", None, None, None, "mixed"),
+        ("B1", "bandwidth", "bandwidth", "50Mbit", 50.0, None, None, "mixed"),
+        ("B2", "bandwidth", "bandwidth", "20Mbit", 20.0, None, None, "mixed"),
+        ("B3", "bandwidth", "bandwidth", "10Mbit", 10.0, None, None, "mixed"),
+        ("L1", "loss", "loss", "1pct", None, 1.0, None, "mixed"),
+        ("L2", "loss", "loss", "5pct", None, 5.0, None, "mixed"),
+        ("L3", "loss", "loss", "10pct", None, 10.0, None, "mixed"),
+        ("D1", "delay", "delay", "20ms", None, None, "20ms", "mixed"),
+        ("D2", "delay", "delay", "50ms", None, None, "50ms", "mixed"),
+        ("D3", "delay", "delay", "100ms", None, None, "100ms", "mixed"),
     ]
     out = []
-    for sid, label, family, severity, bw, loss, delay in specs:
-        traffic = "mixed"
-        if sid == "N1":
-            traffic = "ping_http"
-        elif sid == "N2":
-            traffic = "iperf_tcp"
+    for sid, label, family, severity, bw, loss, delay, traffic in specs:
         out.append({
             **base,
             "scenario_id": sid,
@@ -102,6 +105,72 @@ def _scenarios(duration_sec: int) -> list[dict[str, Any]]:
             "traffic": traffic,
         })
     return out
+
+
+def _scenarios_protocol_d(duration_sec: int) -> list[dict[str, Any]]:
+    """Diversity over severity × workload, same 2s6h topology.
+
+    Goal: model cannot memorize one tc setting as one scenario_id.
+    """
+    base = dict(duration_sec=duration_sec, affected_link=FAULT_AFFECTED_LINK)
+    out: list[dict[str, Any]] = []
+
+    for sid, severity, traffic in (
+        ("N_ping", "ping", "ping"),
+        ("N_http", "http", "http"),
+        ("N_tcp", "iperf_tcp", "iperf_tcp"),
+        ("N_udp", "iperf_udp", "iperf_udp"),
+        ("N_low", "mixed_low", "mixed_low"),
+        ("N_high", "mixed_high", "mixed_high"),
+    ):
+        out.append({
+            **base, "scenario_id": sid, "fault_label": "normal",
+            "fault_family": "normal", "fault_severity": severity,
+            "configured_bw": None, "configured_loss": None, "configured_delay": None,
+            "traffic": traffic,
+        })
+
+    for bw in (1.0, 2.0, 5.0, 10.0, 20.0):
+        tag = str(int(bw))
+        for suffix, traffic in (("t", "iperf_tcp"), ("m", "mixed")):
+            out.append({
+                **base, "scenario_id": f"B_{tag}M_{suffix}",
+                "fault_label": "bandwidth", "fault_family": "bandwidth",
+                "fault_severity": f"{tag}Mbit",
+                "configured_bw": bw, "configured_loss": None, "configured_delay": None,
+                "traffic": traffic,
+            })
+
+    for loss in (1.0, 3.0, 5.0, 10.0, 20.0):
+        tag = str(int(loss))
+        for suffix, traffic in (("t", "iperf_tcp"), ("m", "mixed")):
+            out.append({
+                **base, "scenario_id": f"L_{tag}pct_{suffix}",
+                "fault_label": "loss", "fault_family": "loss",
+                "fault_severity": f"{tag}pct",
+                "configured_bw": None, "configured_loss": loss, "configured_delay": None,
+                "traffic": traffic,
+            })
+
+    for delay_ms in (10, 25, 50, 100, 200):
+        for suffix, traffic in (("t", "iperf_tcp"), ("m", "mixed")):
+            out.append({
+                **base, "scenario_id": f"D_{delay_ms}ms_{suffix}",
+                "fault_label": "delay", "fault_family": "delay",
+                "fault_severity": f"{delay_ms}ms",
+                "configured_bw": None, "configured_loss": None,
+                "configured_delay": f"{delay_ms}ms",
+                "traffic": traffic,
+            })
+    return out
+
+
+def _scenarios(duration_sec: int, protocol: str) -> list[dict[str, Any]]:
+    if protocol == "legacy":
+        return _scenarios_legacy(duration_sec)
+    if protocol == "d":
+        return _scenarios_protocol_d(duration_sec)
+    raise ValueError(f"unknown protocol {protocol}")
 
 
 def _window(path: str, start: str, end: str):
@@ -159,35 +228,55 @@ def _parse_iperf_csv(text: str) -> tuple[Optional[float], Optional[float]]:
 
 
 def _start_servers(hosts: dict) -> None:
-    _hcmd(hosts["h4"], "iperf -s >/dev/null 2>&1 &")
-    _hcmd(hosts["h4"], "iperf -s -u -p 5002 >/dev/null 2>&1 &")
-    _hcmd(hosts["h4"], "python3 -m http.server 8080 >/dev/null 2>&1 &")
-    _hcmd(hosts["h5"], "iperf -s -p 5003 >/dev/null 2>&1 &")
+    for hname, port_tcp, port_udp in (
+        ("h4", 5001, 5002),
+        ("h5", 5003, 5004),
+        ("h6", 5005, 5006),
+    ):
+        _hcmd(hosts[hname], f"iperf -s -p {port_tcp} >/dev/null 2>&1 &")
+        _hcmd(hosts[hname], f"iperf -s -u -p {port_udp} >/dev/null 2>&1 &")
+        _hcmd(hosts[hname], "python3 -m http.server 8080 >/dev/null 2>&1 &")
     time.sleep(1)
 
 
-def _traffic(hosts: dict, kind: str, duration: int) -> None:
-    t = max(5, duration - 5)
-    assert_lab_targets(["10.0.0.4", "10.0.0.5"], context="fault-traffic")
-    cmds = []
-    if kind in ("ping_http", "mixed"):
-        cmds += [
-            ("h1", f"timeout {t} ping -i 0.2 10.0.0.4 >/dev/null 2>&1 &"),
-            ("h2", f"timeout {t} ping -i 0.3 10.0.0.5 >/dev/null 2>&1 &"),
-            ("h3", (
-                f"timeout {t} bash -c 'while true; do "
-                "wget -q -O /dev/null http://10.0.0.4:8080/ || true; sleep 0.5; done' >/dev/null 2>&1 &"
-            )),
-        ]
-    if kind in ("iperf_tcp", "mixed"):
-        cmds += [
-            ("h1", f"timeout {t} iperf -c 10.0.0.4 -t {t} >/dev/null 2>&1 &"),
-            ("h2", f"timeout {t} iperf -c 10.0.0.5 -p 5003 -t {t} >/dev/null 2>&1 &"),
-        ]
-    if kind == "mixed":
-        cmds.append(
-            ("h3", f"timeout {t} iperf -u -c 10.0.0.4 -p 5002 -t {t} -b 2M >/dev/null 2>&1 &"),
-        )
+def _pair(repeat_idx: int) -> tuple[str, str]:
+    return TRAFFIC_PAIRS[int(repeat_idx) % len(TRAFFIC_PAIRS)]
+
+
+def _tcp_port(dst_ip: str) -> int:
+    return {"10.0.0.4": 5001, "10.0.0.5": 5003, "10.0.0.6": 5005}[dst_ip]
+
+
+def _udp_port(dst_ip: str) -> int:
+    return {"10.0.0.4": 5002, "10.0.0.5": 5004, "10.0.0.6": 5006}[dst_ip]
+
+
+def _traffic(hosts: dict, kind: str, duration: int, repeat_idx: int = 0) -> None:
+    t = max(8, duration - 8)
+    src, dst = _pair(repeat_idx)
+    assert_lab_targets([dst], context="fault-traffic")
+    p_tcp, p_udp = _tcp_port(dst), _udp_port(dst)
+    cmds: list[tuple[str, str]] = []
+
+    if kind in ("ping", "ping_http", "mixed", "mixed_low", "mixed_high"):
+        cmds.append((src, f"timeout {t} ping -i 0.2 {dst} >/dev/null 2>&1 &"))
+    if kind in ("http", "ping_http", "mixed", "mixed_low", "mixed_high"):
+        cmds.append((
+            src,
+            f"timeout {t} bash -c 'while true; do "
+            f"wget -q -O /dev/null http://{dst}:8080/ || true; sleep 0.5; done' >/dev/null 2>&1 &",
+        ))
+    if kind in ("iperf_tcp", "mixed", "mixed_high"):
+        cmds.append((src, f"timeout {t} iperf -c {dst} -p {p_tcp} -t {t} >/dev/null 2>&1 &"))
+    if kind == "mixed_low":
+        cmds.append((src, f"timeout {t} iperf -c {dst} -p {p_tcp} -t {t} -b 2M >/dev/null 2>&1 &"))
+    if kind in ("iperf_udp", "mixed", "mixed_high"):
+        udp_bw = "8M" if kind == "mixed_high" else "2M"
+        cmds.append((src, f"timeout {t} iperf -u -c {dst} -p {p_udp} -t {t} -b {udp_bw} >/dev/null 2>&1 &"))
+    if kind == "iperf_tcp" and src == "h1":
+        # second TCP flow on a different pair so bandwidth faults still show under load
+        cmds.append(("h2", f"timeout {t} iperf -c 10.0.0.5 -p 5003 -t {t} >/dev/null 2>&1 &"))
+
     for hname, cmd in cmds:
         assert_no_default_route_hint(cmd)
         _hcmd(hosts[hname], cmd)
@@ -246,7 +335,8 @@ def _write_run(run_dir: str, start: str, end: str, probes: list, meta: dict) -> 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--repeat", type=int, default=3, help="Independent runs per scenario")
-    ap.add_argument("--duration", type=int, default=45)
+    ap.add_argument("--duration", type=int, default=0, help="Seconds per run (0 = protocol default)")
+    ap.add_argument("--protocol", choices=("legacy", "d"), default="d")
     ap.add_argument("--only", default="", help="Comma scenario ids, e.g. N1,B1,L2")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
@@ -257,7 +347,8 @@ def main() -> None:
         with open(MANIFEST, "w", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(MANIFEST_HEADER)
 
-    scs = _scenarios(args.duration)
+    duration = args.duration or (45 if args.protocol == "legacy" else 90)
+    scs = _scenarios(duration, args.protocol)
     if args.only:
         wanted = {x.strip() for x in args.only.split(",") if x.strip()}
         scs = [s for s in scs if s["scenario_id"] in wanted]
@@ -267,6 +358,7 @@ def main() -> None:
     plan = [(sc, r) for sc in scs for r in range(args.repeat)]
     print("=" * 60)
     print("  Fault collection | same topo 2s6h | inject s1-s2")
+    print(f"  protocol={args.protocol} duration={duration}s")
     print(f"  {len(scs)} scenario × {args.repeat} run = {len(plan)} runs")
     print("  Does NOT write dataset/flow_stats.csv")
     print("  Ground truth is metadata, not features")
@@ -274,6 +366,7 @@ def main() -> None:
     if args.dry_run:
         for sc, r in plan:
             print(f"  {sc['scenario_id']} r{r} label={sc['fault_label']} "
+                  f"traffic={sc['traffic']} pair={_pair(r)[0]}->{_pair(r)[1]} "
                   f"bw={sc['configured_bw']} loss={sc['configured_loss']} delay={sc['configured_delay']}")
         return
 
@@ -324,7 +417,7 @@ def main() -> None:
             print(f"\n[*] {sc['scenario_id']} r{repeat_idx} | {run_id} | {sc['fault_label']}")
             probes: list[dict] = []
             stop = threading.Event()
-            _traffic(hosts, sc["traffic"], sc["duration_sec"])
+            _traffic(hosts, sc["traffic"], sc["duration_sec"], repeat_idx)
             th = threading.Thread(target=_probe_loop, args=(hosts, probes, stop), daemon=True)
             th.start()
             time.sleep(int(sc["duration_sec"]))
@@ -338,6 +431,7 @@ def main() -> None:
             time.sleep(8)
             end = _now()
             clear_core_qos(link)
+            src_h, dst_ip = _pair(repeat_idx)
             meta = {
                 "run_id": run_id,
                 "scenario_id": sc["scenario_id"],
@@ -350,11 +444,13 @@ def main() -> None:
                 "configured_delay": sc["configured_delay"],
                 "source": SOURCE_FAULT,
                 "topology_id": FAULT_TOPOLOGY_ID,
+                "protocol": args.protocol,
                 "start_time": start,
                 "end_time": end,
                 "duration_sec": sc["duration_sec"],
                 "repeat_idx": repeat_idx,
                 "traffic": sc["traffic"],
+                "traffic_pair": f"{src_h}->{dst_ip}",
                 **ports,
                 "notes": "gt metadata; do not use configured_* or ids as features",
             }

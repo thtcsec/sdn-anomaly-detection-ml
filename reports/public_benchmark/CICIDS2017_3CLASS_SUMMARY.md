@@ -1,9 +1,13 @@
 # CICIDS2017 3-class public benchmark
 
+## Phạm vi (khóa Word/slides)
+
+CICIDS2017 được sử dụng ở mức tham khảo/benchmark bổ sung cho bài toán intrusion detection nói chung. Do dataset không được thu thập từ kiến trúc SDN/OpenFlow, kết quả không được sử dụng để đánh giá khả năng tổng quát hóa của pipeline SDN hoặc mô hình triển khai trên os-ken Controller.
+
 ## Purpose
 
 Supplement the original Mininet lab benchmark with a larger external flow
-dataset so the project is not defended only with `6` real DDoS lab rows.
+dataset so the project is not defended only with `6` real DDoS lab rows. Appendix only — do not run new CICIDS jobs for the defense.
 
 ## Source
 

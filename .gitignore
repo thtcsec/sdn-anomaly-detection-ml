@@ -31,6 +31,7 @@ models/public_benchmark/
 dataset/controller.pid
 dataset/fault_live/
 dataset/fault_runs/
+dataset/fault_runs_legacy/
 tmp/
 
 

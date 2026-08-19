@@ -148,6 +148,8 @@ def merge_one(run_dir: str) -> pd.DataFrame:
     agg["configured_bw"] = meta.get("configured_bw")
     agg["configured_loss"] = meta.get("configured_loss")
     agg["configured_delay"] = meta.get("configured_delay")
+    agg["traffic"] = meta.get("traffic", "")
+    agg["traffic_pair"] = meta.get("traffic_pair", "")
     agg["source"] = meta.get("source", "mininet_lab_fault_run")
     agg["is_synthetic"] = 0
     return agg

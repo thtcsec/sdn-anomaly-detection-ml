@@ -42,9 +42,9 @@ if ! ss -lntp 2>/dev/null | grep -q ':6633'; then
   exit 1
 fi
 
-echo "[*] collect 12x3"
+echo "[*] collect protocol D (override: pass --protocol legacy)"
 export PYTHONPATH=/usr/lib/python3/dist-packages:${PYTHONPATH:-}
-"$ROOT/.venv/bin/python" "$ROOT/src/collect_independent_fault_runs.py" "$@"
+"$ROOT/.venv/bin/python" "$ROOT/src/collect_independent_fault_runs.py" --protocol d "$@"
 echo "[*] merge"
 "$ROOT/.venv/bin/python" "$ROOT/src/merge_fault_runs.py"
 echo "[*] eval LOSO"

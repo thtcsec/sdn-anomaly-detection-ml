@@ -89,10 +89,21 @@ Deploy realtime vẫn XGBoost prototype (latency ~0,44 ms). Candidate 8-feature 
 
 RF Acc 0,987 ± 0,008 · XGB 0,982 ± 0,017. Ghi rõ cùng `scenario_id` có thể nằm cả train và test.
 
-### 3c. Public (không train controller)
+### 3c. Public (không train controller) — PHẠM VI BẮT BUỘC
 
-- CICIDS2017 3-class: 880.176 · XGB/RF F1-macro ≈ 0,999 — không phải OpenFlow 5s.
-- InSDN binary: 343.889 · XGB/RF F1 ≈ 0,999 — chỉ 2 lớp.
+Paste nguyên văn vào Word/slides khi nhắc InSDN hoặc CICIDS. **Không** dùng số public thay Bảng 5 / mô hình realtime.
+
+**InSDN (external SDN-security benchmark, không thay testbed):**
+
+> Sử dụng InSDN như một external benchmark cho nhánh phát hiện bất thường an ninh trong môi trường SDN, nhằm đánh giá khả năng của XGBoost và Random Forest trên dữ liệu SDN độc lập với testbed tự xây dựng. Kết quả được báo cáo như thực nghiệm bổ sung và không được sử dụng thay thế cho benchmark chính hoặc mô hình realtime.
+
+Số khóa: 343.889 · XGB/RF F1 ≈ 0,999 · chỉ 2 lớp. Nguồn: `reports/public_benchmark/INSDN_BINARY_SUMMARY.md`.
+
+**CICIDS2017 (appendix / intrusion-detection tham khảo, không phải SDN):**
+
+> CICIDS2017 được sử dụng ở mức tham khảo/benchmark bổ sung cho bài toán intrusion detection nói chung. Do dataset không được thu thập từ kiến trúc SDN/OpenFlow, kết quả không được sử dụng để đánh giá khả năng tổng quát hóa của pipeline SDN hoặc mô hình triển khai trên os-ken Controller.
+
+Số khóa: 880.176 · XGB/RF F1-macro ≈ 0,999 — không phải OpenFlow 5s. Nguồn: `reports/public_benchmark/CICIDS2017_3CLASS_SUMMARY.md`.
 
 ---
 
@@ -106,6 +117,8 @@ RF Acc 0,987 ± 0,008 · XGB 0,982 ± 0,017. Ghi rõ cùng `scenario_id` có th�
 6. PCA/t-SNE: lab tách lớp → giải thích Acc random cao. Không bịa “chồng lấn mạnh”.
 7. 3 lớp: một đoạn “phát hiện binary ổn hơn phân loại DDoS vs Portscan khi bỏ cổng thô”.
 8. Không viết zero-day, không viết IDS tổng quát.
+9. InSDN = thực nghiệm bổ sung SDN-security, **không** thay benchmark chính/realtime (dán đoạn 3c).
+10. CICIDS2017 = phụ lục intrusion detection, **không** dùng đánh giá pipeline SDN / os-ken (dán đoạn 3c).
 
 ---
 

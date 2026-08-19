@@ -1,5 +1,9 @@
 # InSDN binary public supplementary
 
+## Phạm vi (khóa Word/slides)
+
+Sử dụng InSDN như một external benchmark cho nhánh phát hiện bất thường an ninh trong môi trường SDN, nhằm đánh giá khả năng của XGBoost và Random Forest trên dữ liệu SDN độc lập với testbed tự xây dựng. Kết quả được báo cáo như thực nghiệm bổ sung và không được sử dụng thay thế cho benchmark chính hoặc mô hình realtime.
+
 - Source: Hugging Face `Sharukesh/INSDN` (`Dataset.csv`), because official UCD zip was unreachable.
 - Rows: **343,889** · `normal` 68,424 · `anomaly` 275,465
 - This mirror is **binary**, not the paper's multiclass Normal/DoS/DDoS/Probe split.

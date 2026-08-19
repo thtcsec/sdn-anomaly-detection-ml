@@ -124,6 +124,8 @@ FAULT_FORBIDDEN_FEATURES = [
     'configured_bw',
     'configured_loss',
     'configured_delay',
+    'traffic',
+    'traffic_pair',
     'ip_src',
     'ip_dst',
     'tp_src',

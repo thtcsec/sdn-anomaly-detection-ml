@@ -268,10 +268,12 @@ def generate_portscan(net, duration=30):
 
 ---
 
-## Phụ lục G: Kết quả Model sau Data Augmentation
+## Phụ lục G: Kết quả Model sau Data Augmentation (LỊCH SỬ — tập 11k)
+
+**Không dán vào Kết quả.** Acc 0,9991 (99,91%) là bảng augmentation 11.283 mẫu. Số hiện tại: LOSO `reports/binary_realtime_loso_summary.csv` (RF Acc 0,7724 · XGB 0,7520 · min-recall 0). Random-split ~0,999 chỉ phụ lục leakage.
 
 ### XGBoost (Supervised - Multiclass):
-- **Accuracy:** 0.9991 (99.91%)
+- **Accuracy:** 0.9991 (99.91%) — *historical 11k table*
 - **F1-Score (weighted):** 0.9991
 
 | Class | Precision | Recall | F1-Score | Support |

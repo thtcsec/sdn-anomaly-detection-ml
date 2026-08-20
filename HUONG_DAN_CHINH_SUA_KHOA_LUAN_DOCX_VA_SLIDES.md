@@ -25,48 +25,59 @@ Nguồn: `reports/environment_lock.txt`.
 
 ## 1. Dataset (bảng phân phối + slide Dataset)
 
-Pool train/controller: independent OpenFlow, `run_id` thật.
+Pool train/controller: independent OpenFlow, `run_id` thật. Nguồn: `dataset/flow_stats_grouped.csv` + `reports/grouped_real_only_STATUS.csv`.
 
 | Nhãn | Số mẫu (poll 5s) | Tỷ lệ | Nguồn |
 |------|------------------|-------|--------|
-| DDoS | **43.206** | 54,61% | 11 run hping3 (SYN/UDP/ICMP, multiport) |
-| Portscan | **20.238** | 25,58% | 12 run nmap (SYN/connect, nhiều dải cổng) |
-| Normal | **15.670** | 19,81% | 9 run ping/iperf/HTTP thật qua switch |
-| **Tổng** | **79.114 snapshot** | 100% | **32 `run_id` · 19 `scenario_id`** |
+| Normal | **198.810** | 60,81% | 135 run ping/iperf/HTTP/UDP qua switch |
+| DDoS | **93.648** | 28,64% | 44 run hping3 (SYN/UDP/ICMP, multiport) |
+| Portscan | **34.503** | 10,55% | 27 run nmap (SYN/connect, nhiều dải cổng) |
+| **Tổng** | **326.961 snapshot** | 100% | **206 `run_id` · 21 `scenario_id`** |
 
 Phải viết ngay dưới bảng:
 
-> 79.114 là số lần controller poll OpenFlow mỗi 5 giây, không phải 79.114 phiên traffic độc lập. Gộp last-poll theo 5-tuple còn **23.843** mẫu. Đánh giá generalization tách theo **19 kịch bản**.
+> 326.961 là số lần controller poll OpenFlow mỗi 5 giây, không phải 326.961 phiên traffic độc lập. Last-poll theo 5-tuple còn **113.226** mẫu (`scenario_held_out_STATUS.csv`). Đánh giá generalization tách theo **21 kịch bản**. Đây là thêm run độc lập trên **cùng lab 2 switch / 6 host** — không phải quy mô đa dạng kiểu CICIDS2017.
 
-- Bảng luận văn cũ **11.283** (DDoS lúc đầu 6 mẫu thật + 400 bootstrap) **giữ như lịch sử**.
+- Bảng luận văn cũ **11.283** (DDoS lúc đầu 6 mẫu thật + 400 bootstrap) và mốc **79.114 / 32 run / 19 scenario** **giữ như lịch sử**.
 - Train 80/20 + SMOTE chỉ là pipeline phụ lục, không phải số chính.
 
 ### Đoạn phương pháp — Normal (paste Word)
 
-> Tập Normal không sinh ngẫu nhiên. Dữ liệu thu từ 9 phiên Mininet độc lập (`run_id` riêng): ICMP (ping), TCP (iperf/HTTP), UDP (iperf), đi qua switch OpenFlow 1.3, os-ken ghi flow stats mỗi 5 giây. Nhóm không dùng bộ sinh 20.000 dòng đã thử rồi loại.
+> Tập Normal không sinh ngẫu nhiên. Dữ liệu thu từ 135 phiên Mininet độc lập (`run_id` riêng) trên 4 kịch bản: ICMP (ping), TCP (iperf/HTTP), UDP (iperf), đi qua switch OpenFlow 1.3, os-ken ghi flow stats mỗi 5 giây. Nhóm không dùng bộ sinh 20.000 dòng đã thử rồi loại.
 
-**Cấm viết:** 231.314 mẫu; Normal 20k HTTP/DNS/SSH; `flow_stats.csv` 155k là nmap thật.
+**Cấm viết:** 231.314 mẫu; Normal 20k HTTP/DNS/SSH; `flow_stats.csv` 155k là nmap thật; Acc random-split ~0,999 làm số chính.
 
 ---
 
 ## 2. Bảng 4 model — DUY NHẤT được chiếu là Kết quả
 
-Nguồn: `reports/binary_realtime_loso_summary.csv`
+Nguồn: `reports/binary_realtime_loso_summary.csv` (pool 326.961 · **21** scenario). **Không** dùng bảng LOSO cũ 79k (XGB Acc 0,9191 / F1 0,9544 / min-recall 0,1342).
 
-Cùng bài: **Normal vs Attack** · LOSO 19 scenario · 3 poll đầu/5-tuple · 8 feature **bỏ `tp_src`/`tp_dst`** · không SMOTE.
+Cùng bài: **Normal vs Attack** · LOSO 21 scenario · 3 poll đầu/5-tuple · 8 feature **bỏ `tp_src`/`tp_dst`** · không SMOTE.
 
-| Model | Acc pooled | F1 anomaly | P anomaly | R anomaly | Recall theo scenario tấn công | Normal FPR |
-|-------|------------|------------|-----------|-----------|-------------------------------|------------|
-| **XGBoost** | 0,9191 | 0,9544 | 0,9832 | 0,9274 | **0,9074** (min **0,1342**) | **0,2469** |
-| Random Forest | 0,8866 | 0,9349 | 0,9842 | 0,8902 | **0,8619** (min **0**) | **0,1915** |
-| Autoencoder | 0,0831 | 0,0074 | 0,3504 | 0,0037 | 0,1022 (min 0) | 0,0999 |
-| Isolation Forest | 0,0813 | 0,0005 | 0,0426 | 0,0002 | 0,0707 (min 0) | 0,1014 |
+| Model | Acc pooled | F1 anomaly | P anomaly | R anomaly | Recall theo scenario tấn công | Normal FPR (mean / max) |
+|-------|------------|------------|-----------|-----------|-------------------------------|-------------------------|
+| Random Forest | **0,7724** | **0,7746** | 0,7808 | 0,7684 | **0,7301** (min **0**) | **0,1616 / 0,2928** |
+| **XGBoost** | 0,7520 | 0,7556 | 0,7577 | 0,7535 | **0,7223** (min **0**) | **0,1805 / 0,3150** |
+| Autoencoder | 0,4759 | 0,0463 | 0,3122 | 0,0250 | 0,0495 (min 0) | 0,0614 / 0,0746 |
+| Isolation Forest | 0,4665 | 0,0003 | 0,0029 | 0,0001 | 0,0036 (min 0) | 0,0484 / 0,0638 |
 
 ### Đoạn bắt buộc dưới bảng (paste Word)
 
-> Acc/F1 pooled không đứng một mình vì số dòng tấn công chiếm đa số. XGBoost/Random Forest vẫn bỏ sót ít nhất một kịch bản nmap (`portscan_nmap_h4_h1`: XGB 0,134 · RF 0). Tỷ lệ báo động nhầm trên snapshot Normal khoảng 19–25%. Autoencoder và Isolation Forest thất bại trên lab này và chỉ giữ làm baseline nhị phân. Accuracy 0,9999 của random-flow split phản ánh rò rỉ cùng 5-tuple khi poll 5 giây, không dùng để suy rộng.
+> Acc/F1 pooled không đứng một mình. Trên protocol LOSO mới, RF hơi cao hơn XGB, nhưng **min attack recall = 0** (cả hai sót `portscan_nmap_h4_h1`, 149 snapshot). Normal FPR trung bình ~0,16–0,18 (max ~0,29–0,32). AE/IF thất bại trên lab này và chỉ giữ làm baseline. Accuracy ~0,999 của random-flow split phản ánh rò cùng 5-tuple khi poll 5 giây, không dùng để suy rộng. LOSO min-recall = 0 là điểm yếu phải nói thẳng.
 
-Deploy realtime vẫn XGBoost prototype (latency ~0,44 ms). Candidate 8-feature **không** bật DROP vì FPR Normal.
+Deploy realtime vẫn XGBoost prototype (latency ~0,44 ms trên `model_comparison.csv`). Candidate 8-feature **không** bật DROP vì FPR Normal.
+
+## 2b. Fault — hai câu hỏi, không trộn vào anomaly
+
+Nguồn: `dataset/fault_stats_grouped.csv` (6666 snapshot · **324 `run_id`** · **36 `scenario_id`**) · `reports/fault_protocol_d1_loso.csv` / `fault_protocol_d2_loso.csv` (pooled n_test = 5370).
+
+| Protocol | Bài | RF Acc / F1-macro | XGB Acc / F1-macro | Rule-based Acc |
+|----------|-----|-------------------|--------------------|----------------|
+| **D1** | Normal vs Fault (phát hiện) | **0,9339 / 0,8636** | 0,9272 / 0,8527 | 0,1598 |
+| **D2** | 4 lớp normal/bw/loss/delay | 0,3726 / 0,4168 | **0,3793 / 0,4200** | 0,1598 |
+
+> D1: phát hiện lỗi liên kết trên testbed là nhận xét được. **D2 chưa giải được** — Acc ~0,37–0,38 / F1-macro ~0,42, chỉ nhỉnh random 4-lớp (~0,25), không đủ để khẳng định phân loại loại lỗi. Không trộn số D1/D2 với bảng anomaly.
 
 ---
 
@@ -87,7 +98,7 @@ Deploy realtime vẫn XGBoost prototype (latency ~0,44 ms). Candidate 8-feature 
 
 ### 3b. Grouped-by-run (còn overlap scenario)
 
-RF Acc 0,987 ± 0,008 · XGB 0,982 ± 0,017. Ghi rõ cùng `scenario_id` có thể nằm cả train và test.
+RF Acc 0,9931 ± 0,0082 · F1-macro 0,9863 ± 0,0093. XGB Acc 0,9937 ± 0,0049 · F1-macro 0,9872 ± 0,0055. Ghi rõ cùng `scenario_id` có thể nằm cả train và test — **không** phải số generalization.
 
 ### 3c. Public (không train controller) — PHẠM VI BẮT BUỘC
 
@@ -109,16 +120,17 @@ Số khóa: 880.176 · XGB/RF F1-macro ≈ 0,999 — không phải OpenFlow 5s. 
 
 ## 4. Checklist sửa Word (làm lần lượt)
 
-1. Chương dataset: 79.114 **snapshot** / 23.843 5-tuple / 19 scenario / 32 run. Giữ 11.283 lịch sử.
+1. Chương dataset: 326.961 **snapshot** / 113.226 5-tuple / 21 scenario / 206 run. Giữ 11.283 và 79.114 như lịch sử.
 2. Không xóa câu “DDoS từng chỉ 6 mẫu thật”.
-3. Thay bảng 4 model bằng **mục 2**. Xóa Acc 0,9999 / AE 0,98 khỏi bảng chính.
-4. Thêm đoạn hạn chế: Mininet 1 topo; không mixed traffic; sót 1 kịch bản nmap; FPR Normal 19–25%; AE/IF fail; chưa production.
-5. Realtime: poll 5s · 3 polling reply / nguồn · DROP `hard_timeout` **120s** (không viết 60s).
+3. Thay bảng 4 model bằng **mục 2** (LOSO mới: RF Acc 0,7724 · XGB 0,7520 · min-recall **0**). Xóa Acc 0,9999 / AE 0,98 / bảng LOSO 79k khỏi bảng chính.
+4. Thêm đoạn hạn chế: Mininet 1 topo 2s6h; 326k ≠ đa dạng CICIDS; sót `portscan_nmap_h4_h1` (min-recall 0); FPR Normal ~0,16–0,32; AE/IF fail; D2 4-class yếu; chưa production.
+5. Realtime: poll 5s · 3 polling reply / nguồn · DROP `hard_timeout` **120s** (không viết 60s). Không Acc 99,91%.
 6. PCA/t-SNE: lab tách lớp → giải thích Acc random cao. Không bịa “chồng lấn mạnh”.
 7. 3 lớp: một đoạn “phát hiện binary ổn hơn phân loại DDoS vs Portscan khi bỏ cổng thô”.
 8. Không viết zero-day, không viết IDS tổng quát.
 9. InSDN = thực nghiệm bổ sung SDN-security, **không** thay benchmark chính/realtime (dán đoạn 3c).
 10. CICIDS2017 = phụ lục intrusion detection, **không** dùng đánh giá pipeline SDN / os-ken (dán đoạn 3c).
+11. Fault: dán mục **2b**. D1 được nói; **D2 chưa giải**.
 
 ---
 
@@ -126,17 +138,18 @@ Số khóa: 880.176 · XGB/RF F1-macro ≈ 0,999 — không phải OpenFlow 5s. 
 
 | Slide | Đúng | Sai |
 |-------|------|-----|
-| Dataset | 79.114 snapshot 5s · 23.843 5-tuple · 19 scenario · 32 run | “79k phiên” / 231k |
-| Kết quả | Bảng mục 2 + min recall + FPR | Acc 0,9999 / “4 model đều tốt” |
-| Hạn chế | Mininet · FPR 0,25 · sót nmap · AE/IF ~0,08 | Production / zero-day |
-| Realtime | Prototype XGB · poll 5s · DROP 120s | Candidate robust đã bật |
-| Phụ lục | 0,9999 = leakage | Acc 1,000 tuyệt đối |
+| Dataset | 326.961 snapshot 5s · 113.226 5-tuple · 21 scenario · 206 run | “326k phiên” / CICIDS-scale / 79k như số hiện tại |
+| Kết quả | Bảng mục 2 + min recall **0** + FPR | Acc 0,9999 / LOSO 79k cũ / “4 model đều tốt” |
+| Fault | D1 Acc ~0,93 · **D2 Acc ~0,37 F1 ~0,42** | “đã phân loại được loại lỗi” |
+| Hạn chế | Mininet 2s6h · min-recall 0 · FPR ~0,16–0,32 · D2 yếu | Production / zero-day |
+| Realtime | Prototype XGB · poll 5s · DROP 120s | Acc 99,91% / Candidate robust đã bật |
+| Phụ lục | 0,9999 = leakage · InSDN/CICIDS không train controller | Acc 1,000 tuyệt đối |
 
 ---
 
 ## 6. File số liệu
 
-- **Chính:** `reports/binary_realtime_loso_summary.csv` · `binary_realtime_loso_per_scenario.csv`
+- **Chính:** `reports/binary_realtime_loso_summary.csv` · `binary_realtime_loso_per_scenario.csv` · `reports/THESIS_NUMBERS.md`
 - Trung gian: `reports/grouped_real_only_summary.csv` · `scenario_held_out_summary.csv`
 - Phụ lục: `reports/model_comparison.csv`
 - Quay video: `HUONG_DAN_QUAY_VIDEO_DEMO.md`
@@ -170,7 +183,7 @@ Văn + Q&A hội đồng (lý thuyết Mininet/os-ken/4 model, sinh CSV, quyền
 | **4.7.3** Normal | `reports/dashboard_normal.png` | ping/iperf, nhãn NORMAL, 0 DROP. |
 | **4.7.4** | `reports/dashboard_auto_mitigation.png` | DROP `10.0.0.4`. `10.0.0.1` cũng bị DROP — FPR lab, ghi vào hạn chế. |
 | **4.7.5** Cấu hình SOC | `reports/dashboard_settings_models.png` | Không Acc 99.91%. Benchmark ~0,33 / ~15,25 ms/flow. |
-| **4.3** (sau đoạn `portscan_nmap_h4_h1`) | Bảng từ `reports/binary_realtime_loso_per_scenario.csv` | Không có PNG sẵn; dán bảng 19 scenario (Recall/FPR). Có thể vẽ bar trong Word. |
+| **4.3** (sau đoạn `portscan_nmap_h4_h1`) | Bảng từ `reports/binary_realtime_loso_per_scenario.csv` | Không có PNG sẵn; dán bảng 21 scenario (Recall/FPR). Có thể vẽ bar trong Word. |
 | **4.5** | `reports/feature_importance_xgboost.png` | `tp_dst`/`tp_src` cao → giải thích vì sao LOSO **bỏ cổng thô**. Đây là model **10 feature đa lớp**, không phải LOSO 8 feature. |
 | **4.5** (tuỳ chọn) | `reports/feature_importance_random_forest.png` hoặc `permutation_importance_random_forest.png` | Đối chứng RF. |
 | **4.8** Thực nghiệm bổ sung | `reports/pca_2d_visualization.png` rồi `reports/tsne_2d_visualization.png` | Lab tách/chồng lớp → Acc random-split cao. Không viết “chồng lấn mạnh” nếu hình tách rõ. |
@@ -186,7 +199,7 @@ Văn + Q&A hội đồng (lý thuyết Mininet/os-ken/4 model, sinh CSV, quyền
 
 ### Caption mẫu Hình 1 (paste Word)
 
-> Hình 1. So sánh bốn mô hình trên benchmark Leave-One-Scenario-Out (nhị phân Normal–Attack, 8 đặc trưng, không cổng thô, tối đa 3 snapshot đầu mỗi flow). XGBoost/Random Forest giữ F1 lớp Attack cao nhưng Normal FPR khoảng 0,19–0,25; Autoencoder và Isolation Forest thất bại trên protocol này.
+> Hình 1. So sánh bốn mô hình trên benchmark Leave-One-Scenario-Out (nhị phân Normal–Attack, 8 đặc trưng, không cổng thô, tối đa 3 snapshot đầu mỗi flow, 21 kịch bản). Random Forest/XGBoost giữ F1 lớp Attack ~0,75–0,77 nhưng min attack recall = 0 và Normal FPR trung bình ~0,16–0,18; Autoencoder và Isolation Forest thất bại trên protocol này.
 
 ---
 
@@ -204,11 +217,11 @@ Chương 4.1–4.7 và Kết luận **đã đúng số LOSO**. Chỉ sửa các 
 **File:** `reports/loso_attack_recall_per_scenario.png`  
 **Caption:**
 
-> Hình 8. Recall của XGBoost và Random Forest trên từng attack scenario trong protocol Leave-One-Scenario-Out. Kịch bản `portscan_nmap_h4_h1` làm giảm Min Attack Recall xuống 0,1342 (XGBoost) và 0 (Random Forest).
+> Hình 8. Recall của XGBoost và Random Forest trên từng attack scenario trong protocol Leave-One-Scenario-Out. Kịch bản `portscan_nmap_h4_h1` làm giảm Min Attack Recall xuống **0** (cả XGBoost và Random Forest).
 
 **Câu chèn ngay dưới hình:**
 
-> Biểu đồ cho thấy phần lớn kịch bản DDoS và một số kịch bản Port Scan được nhận diện với Recall cao, trong khi `portscan_nmap_h4_h1` là trường hợp suy giảm rõ. Điều này giải thích vì sao Mean Attack Recall vẫn ở mức 0,9074 và 0,8619 nhưng Min Attack Recall thấp hơn nhiều.
+> Biểu đồ cho thấy phần lớn kịch bản DDoS được nhận diện khá, trong khi `portscan_nmap_h4_h1` là lỗ thủng (recall 0). Mean Attack Recall ~0,72–0,73 **không** che được Min Attack Recall = 0.
 
 ### 8.3. Mục 4.8 — thay toàn bộ (đang viết “rất cao”, chưa có số, chưa có hình)
 
@@ -220,7 +233,7 @@ Chương 4.1–4.7 và Kết luận **đã đúng số LOSO**. Chỉ sửa các 
 >
 > Phép thứ nhất là Stratified random-split 80/20 trên bài toán đa lớp, sử dụng 10 đặc trưng có `tp_src` và `tp_dst`. SMOTE chỉ được fit trên tập Train sau khi đã tách Test. Trong điều kiện Train và Test cùng miền phân bố, XGBoost đạt Accuracy 0,9999 và F1-macro 0,9999; Random Forest đạt Accuracy 0,9997 và F1-macro 0,9995. Kết quả gần tuyệt đối phản ánh khả năng tách lớp trên lab khi các snapshot của cùng flow identity có thể xuất hiện ở cả hai tập, chứ không chứng minh mô hình nhận diện tốt một kịch bản chưa quan sát.
 >
-> Phép thứ hai là GroupKFold theo `run_id`. Accuracy trung bình đạt 0,987 ± 0,008 với Random Forest và 0,982 ± 0,017 với XGBoost. So với random-split, chỉ số giảm nhưng vẫn cao hơn rõ so với Leave-One-Scenario-Out, vì các run khác nhau vẫn có thể thuộc cùng `scenario_id`.
+> Phép thứ hai là GroupKFold theo `run_id`. Accuracy trung bình đạt 0,9931 ± 0,0082 với Random Forest và 0,9937 ± 0,0049 với XGBoost. So với random-split, chỉ số vẫn rất cao vì các run khác nhau vẫn có thể thuộc cùng `scenario_id` — không thay Bảng 5.
 >
 > Hình 9. Đối chiếu Accuracy và F1-macro giữa random-flow 80/20 và GroupKFold theo `run_id`.
 >
@@ -237,16 +250,16 @@ Chương 4.1–4.7 và Kết luận **đã đúng số LOSO**. Chỉ sửa các 
 
 Không chèn `model_comparison_chart.png` vào 4.8 như hình “kết quả chính”.
 
-### 8.4. Kết luận — chỉ sửa lỗi chính tả
+### 8.4. Kết luận — phải đổi số cho khớp Bảng 5 mới
+
+Các số cũ 0,9191 / 0,9544 / 0,9074 / 0,1342 / 0,2469 **không còn đúng**. Thay bằng mục 2: RF Acc 0,7724 · F1 0,7746 · min-recall 0 · FPR 0,1616; XGB Acc 0,7520 · F1 0,7556 · min-recall 0 · FPR 0,1805. Giữ 0,33–0,44 ms / 120 giây.
 
 **Xóa:** `nghiênên cứu`  
 **Thay:** `nghiên cứu`
 
-Các số trong Kết luận (0,9191 / 0,9544 / 0,9074 / 0,1342 / 0,2469 / 0,33 ms / 120 giây) **đã khớp Bảng 5**. Không viết lại cả chương.
-
 ### 8.5. Phụ lục G — số 0,9991 / 0,9898 / 0,9987 **không** còn đúng trên bộ hiện tại
 
-Đó là số giai đoạn tập **11.283** (có augmentation). CSV khóa hiện tại `reports/model_comparison.csv` (random-split 80/20, bộ 79.114) là:
+Đó là số giai đoạn tập **11.283** (có augmentation). CSV khóa hiện tại `reports/model_comparison.csv` (random-split 80/20, phụ lục) là:
 
 | Mô hình | Accuracy | F1 | Ghi chú |
 |---------|----------|-----|---------|

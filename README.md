@@ -59,17 +59,20 @@ Poll 5 s. Three consecutive source-level alerts → OpenFlow DROP, hard_timeout 
 
 | File | Role |
 |------|------|
-| `dataset/flow_stats_grouped.csv` | Clean independent pool (79,114 poll rows, 32 runs, 19 scenarios) |
+| `dataset/flow_stats_grouped.csv` | Clean independent pool (326,961 poll rows, 206 runs, 21 scenarios) |
+| `dataset/fault_stats_grouped.csv` | Link-fault pool (6,666 rows, 324 runs, 36 scenarios) — not mixed with anomaly |
 | `dataset/train.csv` / `test.csv` | Legacy random-flow split (appendix only) |
 | `dataset/flow_stats.csv` | Not used. Monitor dump; do not cite. |
 
-79,114 is the number of 5-second OpenFlow snapshots, not independent sessions.
+326,961 is the number of 5-second OpenFlow snapshots, not independent sessions. Same 2s6h lab, more runs — not CICIDS-scale diversity. Headline eval: `reports/binary_realtime_loso_summary.csv` (LOSO, 21 scenarios). Do not cite random-split Acc ~0.999.
 
 ## Results to cite
 
 | File | Use |
 |------|-----|
 | `reports/binary_realtime_loso_summary.csv` | Primary 4-model table |
+| `reports/fault_protocol_d1_loso.csv` | Fault detection (D1) |
+| `reports/fault_protocol_d2_loso.csv` | Fault 4-class (D2; still weak) |
 | `reports/environment_lock.txt` | Package versions |
 | `reports/model_comparison.csv` | Appendix (random-flow leakage) |
 | `HUONG_DAN_CHINH_SUA_KHOA_LUAN_DOCX_VA_SLIDES.md` | Word / slide numbers |

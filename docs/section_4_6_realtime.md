@@ -2,7 +2,7 @@
 
 ## 4.6.1. Kiến trúc tích hợp mô hình vào SDN Controller
 
-Sau khi huấn luyện và đánh giá thành công mô hình XGBoost với hiệu năng phân loại vượt trội (Accuracy 99.91%, F1-Score 99.91%), nhóm nghiên cứu tiến hành tích hợp trực tiếp mô hình đã huấn luyện vào bộ điều khiển os-ken SDN Controller nhằm hiện thực hóa khả năng phát hiện tấn công theo thời gian thực (Real-time Anomaly Detection).
+Sau khi huấn luyện, nhóm tích hợp prototype XGBoost vào os-ken SDN Controller để phát hiện tấn công theo thời gian thực. **Không** dùng Acc random-split ~0,999 hay Acc 99,91% (bảng 11k cũ) làm số generalization. Số chính là Leave-One-Scenario-Out nhị phân (`reports/binary_realtime_loso_summary.csv`, 21 kịch bản, 8 feature, 3 poll đầu): Random Forest Acc 0,7724 / F1-anomaly 0,7746; XGBoost Acc 0,7520 / F1-anomaly 0,7556; min attack recall = 0 (`portscan_nmap_h4_h1`); Normal FPR trung bình 0,16–0,18. XGBoost được chọn vì latency (~0,44 ms/flow), không vì Acc pooled cao nhất.
 
 Kiến trúc triển khai bao gồm các thành phần chính sau:
 
@@ -110,7 +110,7 @@ WARNING [2026-05-15 14:02:40] ⚠️ ALERT 10.0.0.6 -> 10.0.0.1 | proto=6 | pkts
 
 - Hệ thống đã chứng minh khả năng phát hiện tấn công real-time với độ trễ thấp (< 10 giây) trong môi trường giả lập Mininet.
 - Việc tích hợp trực tiếp mô hình vào controller giúp loại bỏ hoàn toàn sự phụ thuộc vào hệ thống bên ngoài, giảm thiểu điểm lỗi và đơn giản hóa kiến trúc triển khai.
-- Mô hình XGBoost được chọn cho real-time inference do có tốc độ dự đoán nhanh nhất và hiệu năng phân loại cao nhất trong ba mô hình đã thử nghiệm.
+- Mô hình XGBoost được chọn cho real-time inference vì tốc độ dự đoán nhanh hơn Random Forest trên cùng lab (~0,44 ms vs ~26 ms trong `model_comparison.csv`). LOSO không cho phép gọi đây là Acc 99,91%.
 - Hạn chế: Trong môi trường mạng thực tế với lưu lượng nền phức tạp, có thể cần tinh chỉnh thêm ngưỡng phân loại và mở rộng tập đặc trưng để giảm thiểu false positive.
 
 

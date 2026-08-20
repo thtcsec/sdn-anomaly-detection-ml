@@ -1,74 +1,67 @@
 # HUFLIT FortiGate audit for SDN benchmark
 
-## Decision
+**Re-checked 2026-08-17** after moving the corpus to a shared disk path.
 
-Do **not** use the HUFLIT FortiGate logs as the primary benchmark for this repo.
+Canonical files: `D:\huflit-campus-logs`  
+SOICT old path is a junction: `D:\tu_projects\LatexProject\soict2026\data\raw\huflit_logs`  
+Public CICIDS/InSDN stays at `D:\huflit_logs\public_datasets` (different corpus).
 
-Use them only as an external follow-up experiment if there is time to build a
-separate ETL + labeling pipeline.
+## Decision for the K29 SDN thesis
+
+**Do not switch the primary benchmark to this HUFLIT dump.**
+
+Keep:
+
+- train / LOSO / realtime controller on Mininet OpenFlow (`dataset/flow_stats_grouped.csv`)
+- CICIDS2017 / InSDN as *external* flow benchmarks only
+- HUFLIT campus logs as a **qualitative appendix / defense talking point**, not as controller training data
+
+Switching the thesis onto this dump would raise fail risk, not lower it.
 
 ## Why they were audited
 
-The project needed a less toy-like DDoS benchmark than the original Mininet lab
-set, and the user explicitly pointed to:
+The lab Mininet set looks toy-like to a committee, and the dump is HUFLIT-permitted. The question was whether it can replace OpenFlow snapshots as the main table.
 
-- `D:\tu_projects\LatexProject\soict2026\data`
+## What is actually on disk (no unzip)
 
-## What was found
+Measured 2026-08-17, already-extracted only:
 
-A sample read of:
+| Item | Size |
+|---|---|
+| Whole `soict2026/data` before move | 36.87 GB |
+| `huflit_logs` extracted tree | 32.51 GB |
+| `Thang6.rar` (kept compressed) | 4.45 GB / **~21.1 GB if extracted** |
+| Largest file | `16062026/forti-svh_.../fortigate.csv` **10.86 GB** |
+| Sample `16062026/fortigate.csv` | 1.19 GB, ~1.87M rows |
 
-- `D:\tu_projects\LatexProject\soict2026\data\raw\huflit_logs\15062026\fortigate.csv`
+Inner zips under date folders are still compressed. `16062026/forti-svh_*.zip` and `.rar` are **already extracted**. Extracting `Thang6.rar` would duplicate ~21 GB.
 
-showed a wide firewall/session log schema with fields such as:
+## Modality mismatch
 
-- `action`
-- `attack`
-- `attackid`
-- `bytes`
-- many product- and appliance-specific columns
+FortiGate / nginx / apache / sshd logs. Sample FortiGate columns include `action`, `attack`, `attackid`, `bytes`, `srcip`, `dstip`, appliance fields.
 
-This is **not** the same modality as the current repo, which trains on fixed
-OpenFlow-style flow statistics:
+This is **not** the controller schema:
 
-- `ip_proto`
-- `tp_src`
-- `tp_dst`
-- `packet_count`
-- `byte_count`
-- `duration_sec`
-- `packet_count_per_sec`
-- `byte_count_per_sec`
-- `packet_size_avg`
-- `flow_duration`
+- `ip_proto`, `tp_src`, `tp_dst`, `packet_count`, `byte_count`, `duration_sec`, `packet_count_per_sec`, `byte_count_per_sec`, `packet_size_avg`, `flow_duration`
 
-## Blockers
+A 80k-row sample of `16062026/fortigate.csv` was almost all `type=traffic` with **empty `attack`**. IPS/UTM hits are sparse (the 15–16 Jun FortiGate report lists 163 IPS events on 1.87M logs). There is no `normal / ddos / portscan` label compatible with the 3-class controller.
 
-1. There is no direct `normal / ddos / portscan` label schema compatible with
-   the current 3-class project.
-2. The feature space is different from the current controller-collected flow
-   features, so direct reuse would require a separate ETL and feature
-   engineering pipeline.
-3. Any mapping from FortiGate alert names to `ddos` / `portscan` would be at
-   least partly heuristic, which is risky this close to the report deadline.
-4. Using it as the main benchmark would blur the thesis story: SDN/OpenFlow lab
-   pipeline on one side, campus firewall logs on another.
+## Why switching the thesis would make a fail more likely
 
-## Chosen path
+1. **Wrong topic.** Title and demo are SDN / OpenFlow / os-ken / Mininet DROP. Campus syslog is a different thesis.
+2. **Overlap with SOICT 2026.** Same student + advisor already use this 19+ GB corpus as the *primary* dataset of the log-anomaly / LLM RCA paper. Making KLTN ride the same dump looks like topic hijack / double use, not a save.
+3. **No time.** ETL + heuristic labels + rewrite Word/slides/demo is a new project.
+4. **Heuristic labels are a new attack surface.** Mapping FortiGate `tcp_syn_flood` / `tcp_port_scan` / IPS names onto DDoS/Portscan is guesswork a committee can kill in one question.
+5. **Unzip risk.** Re-extracting archives duplicates 10–21 GB and can stall the machine. That work still would not produce OpenFlow features.
 
-For the main benchmark upgrade, use public labeled flow data from CICIDS2017,
-because it already provides:
+## What actually reduces fail risk (keep doing this)
 
-- `BENIGN`
-- `DDoS`
-- `PortScan`
-
-and can be mapped into the repo's fixed 10-feature schema with much less risk.
+1. Word + slides cite **only** `reports/binary_realtime_loso_summary.csv` (RF Acc 0.7724, F1-anom 0.7746; XGB Acc 0.7520, F1-anom 0.7556; min attack recall **0**; Normal FPR mean 0.16–0.18). Never headline Acc 0.9999 or the retired 79k LOSO table.
+2. Say the dataset is **326,961 OpenFlow 5s snapshots / 113,226 5-tuples / 21 scenarios / 206 runs**, self-collected, Mininet-only. Same 2s6h lab — not CICIDS-scale diversity.
+3. Disclose AE/IF failure on LOSO, the nmap hole (min-recall 0), FPR ~0.16–0.32, D2 4-class still weak (~0.38 Acc), no production claim.
+4. Optional one-page appendix: HUFLIT FortiGate *does* contain scan/flood IPS names on campus — qualitative motivation, **not** a trained table.
+5. Working demo video on the existing controller.
 
 ## Safe thesis wording
 
-> Nhóm có khảo sát log FortiGate của HUFLIT như một nguồn dữ liệu thực tế bên
-> ngoài, tuy nhiên bộ log này khác modality so với flow statistics OpenFlow của
-> hệ thống hiện tại và chưa có nhãn `normal/ddos/portscan` tương thích trực
-> tiếp. Do giới hạn thời gian, nghiên cứu không dùng bộ log này làm benchmark
-> chính mà ưu tiên CICIDS2017 cho phần đánh giá bổ sung.
+> Nhóm được phép khảo sát log FortiGate / web / SSH của hạ tầng HUFLIT. Bộ này là syslog thiết bị và access log, khác modality so với Flow Statistics OpenFlow (poll 5 giây) của hệ thống khóa luận, và không có nhãn `normal/ddos/portscan` tương thích controller. Nghiên cứu không dùng bộ log này làm tập huấn luyện hay bảng kết quả chính. Bảng chính vẫn là Leave-One-Scenario-Out trên 21 kịch bản Mininet tự thu. Log campus chỉ minh họa rằng quét cổng và flood xuất hiện trên mạng thật, cùng hướng với hai lớp tấn công lab.

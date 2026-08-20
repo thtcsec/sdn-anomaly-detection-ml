@@ -74,7 +74,7 @@ Trong khóa luận, cụm từ “lỗi mạng” **không** theo nghĩa fault m
 
 ### B1. Nguồn dữ liệu (mở 2.1 — bắt buộc)
 
-Tập dữ liệu chính **do nhóm tự sinh** trên testbed Mininet–OVS–os-ken, không lấy nhãn từ CICIDS2017 hay InSDN [2]. InSDN/CICIDS nếu nhắc chỉ là *tài liệu liên quan*, không phải tập huấn luyện controller. Vì vậy mọi số Acc/F1 chỉ là **nhận xét thực nghiệm trên 19 kịch bản lab**, không phải khẳng định tổng quát.
+Tập dữ liệu chính **do nhóm tự sinh** trên testbed Mininet–OVS–os-ken, không lấy nhãn từ CICIDS2017 hay InSDN [2]. InSDN/CICIDS nếu nhắc chỉ là *tài liệu liên quan*, không phải tập huấn luyện controller. Vì vậy mọi số Acc/F1 chỉ là **nhận xét thực nghiệm trên 21 kịch bản lab**, không phải khẳng định tổng quát.
 
 ### B2. Cách thu thập và sinh CSV
 
@@ -89,9 +89,9 @@ Tập dữ liệu chính **do nhóm tự sinh** trên testbed Mininet–OVS–os
    - `flow_duration = duration_sec + duration_nsec/1e9`
 6. Một dòng được **append** vào `dataset/flow_stats.csv` kèm `timestamp`, `datapath_id`, 5-tuple, bộ đếm, nhãn cửa sổ.
 7. Script `collect_independent_*_runs.py` cắt các dòng theo khoảng thời gian run, gắn `run_id`, `scenario_id`, tool, proto → `dataset/independent_runs/run_*.csv`.
-8. `merge_independent_runs.py` hợp nhất (bỏ synthetic / massive) → **`dataset/flow_stats_grouped.csv`**: 79.114 snapshot, 32 run, 19 scenario.
+8. `merge_independent_runs.py` hợp nhất (bỏ synthetic / massive) → **`dataset/flow_stats_grouped.csv`**: 326.961 snapshot, 206 run, 21 scenario.
 
-Một phiên TCP sống 30 giây có thể sinh ~6 dòng (mỗi poll 5 s). **79.114 không phải 79.114 phiên độc lập.**
+Một phiên TCP sống 30 giây có thể sinh ~6 dòng (mỗi poll 5 s). **326.961 không phải 326.961 phiên độc lập.** Cùng lab 2s6h, thêm run — không phải đa dạng CICIDS.
 
 ### B3. Xử lý input trước khi vào mô hình
 
@@ -103,7 +103,7 @@ Một phiên TCP sống 30 giây có thể sinh ~6 dòng (mỗi poll 5 s). **79.
 
 ### B4. Method đánh giá (nói rõ trên sơ đồ)
 
-- **Chính:** Leave-One-Scenario-Out, nhị phân Normal–Attack, 19 scenario, tối đa 3 poll đầu mỗi 5-tuple, không SMOTE.
+- **Chính:** Leave-One-Scenario-Out, nhị phân Normal–Attack, 21 scenario, tối đa 3 poll đầu mỗi 5-tuple, không SMOTE. Min-recall = 0.
 - **Trung gian:** GroupKFold theo `run_id`.
 - **Phụ lục:** random 80/20 — Acc ~0,9999 phản ánh rò cùng flow khi poll 5 s, không dùng làm kết luận.
 
@@ -133,7 +133,7 @@ Giữ [1]–[9]. Thêm:
 “Thành phần: Mininet, OVS, os-ken, 4 mô hình offline, Flask. Thu qua OpenFlow Multipart Flow Stats, không qua SPAN/pcap. CSV: mỗi reply → nhiều dòng append `flow_stats.csv` → cắt theo run → gộp `flow_stats_grouped.csv`.”
 
 **Dữ liệu bài báo hay của mình?**  
-“Của nhóm, trên Mininet. InSDN/CICIDS không train controller. Nên em **nhận xét** trên 19 kịch bản lab, không khẳng định SDN thật.”
+“Của nhóm, trên Mininet. InSDN/CICIDS không train controller. Nên em **nhận xét** trên 21 kịch bản lab, không khẳng định SDN thật.”
 
 **Độ tin cậy dữ liệu?**  
 “Tái lập được: cùng topo, cùng tool, có `run_id`. Yếu: giả lập, nhãn theo cửa sổ không theo gói, chỉ 2 họ tấn công, 6 host cố định.”

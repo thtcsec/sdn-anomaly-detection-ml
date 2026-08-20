@@ -3,7 +3,7 @@
 **Đề tài:** Phát hiện bất thường và phân loại lỗi mạng SDN bằng học máy  
 **Nhóm:** Trịnh Hoàng Tú · Trần Minh Thiện | HUFLIT · An ninh mạng · K29  
 **GVHD:** ThS. Cao Tiến Thành  
-**Khớp `KLTN.pdf` ~81 trang (16/08/2026):** Hình 1–4 = method; Bảng 1 khái niệm; Ch.1.3–1.5 fault; 2.1.6 + Protocol D + 4.9 = tập lỗi liên kết (đang thu, chưa bịa số).
+**Khớp số overnight 20/08/2026:** anomaly 326.961 / 206 run / 21 scenario; fault Protocol D 6666 / 324 / 36. Số chính: `reports/binary_realtime_loso_summary.csv`.
 
 **Cách dùng:** 15 phút đọc mục **0 + E + F**; Q&A mục B toạc miệng.  
 Số anomaly: `reports/binary_realtime_loso_summary.csv`. Fault: chỉ nói sau `merge_fault_runs.py` có file thật.
@@ -16,8 +16,8 @@ Hai nhánh **cùng topology** Mininet 2SW/6H, **không trộn CSV / không trộ
 
 | Nhánh | Câu đề tài | Dữ liệu | Đánh giá | Prototype |
 |-------|------------|---------|----------|-----------|
-| An ninh (anomaly) | phát hiện bất thường | 79.114 snapshot · 32 run · 19 scenario · N/DDoS/Portscan | LOSO binary 8 feature | `realtime_detector.py` XGB + DROP |
-| Lỗi liên kết (fault) | phân loại lỗi mạng | 12 scenario × 3 run trên `s1↔s2` | Protocol D LOSO `fault_family` | **chưa** gắn DROP; chỉ thu + phân loại offline |
+| An ninh (anomaly) | phát hiện bất thường | 326.961 snapshot · 206 run · 21 scenario · N/DDoS/Portscan | LOSO binary 8 feature | `realtime_detector.py` XGB + DROP |
+| Lỗi liên kết (fault) | phân loại lỗi mạng | 6666 snapshot · 324 run · 36 scenario trên `s1↔s2` | D1 phát hiện / D2 4-class (yếu) | **chưa** gắn DROP; chỉ thu + phân loại offline |
 
 **Bảng 1 (khái niệm) — bắt buộc thuộc:**
 
@@ -46,7 +46,7 @@ PDF 1.5.2 còn typo **Package → Packet**. Nói miệng “packet loss”.
 
 ```
 Mininet 2SW/6H
-  → [A] monitor.py        → independent_runs → flow_stats_grouped.csv (79.114)
+  → [A] monitor.py        → independent_runs → flow_stats_grouped.csv (326.961)
   → [B] realtime_detector → XGB 10 feat → Alert×3 → DROP 120s + dashboard
   → [C] fault_monitor     → fault_live → fault_runs → fault_stats_grouped.csv
 A và C không chạy cùng lúc (cùng cổng 6633). A không dùng lúc demo. C không ghi flow_stats.csv.
@@ -63,7 +63,7 @@ A và C không chạy cùng lúc (cùng cổng 6633). A không dùng lúc demo. 
 ## A3. Dataset & provenance
 
 - Bảng luận văn cũ: ~**11.283** mẫu: Portscan 10.565 · Normal 312 · DDoS 406 (6 lab thật + 400 bootstrap)
-- **Pool train/controller hiện tại:** **79.114 snapshot / 5s** (không phải 79k phiên) · **23.843** 5-tuple last-poll · **19 `scenario_id`** · **32 `run_id`** · DDoS **43.206** · Portscan **20.238** · Normal **15.670**
+- **Pool train/controller hiện tại:** **326.961 snapshot / 5s** (không phải 326k phiên) · **113.226** 5-tuple last-poll · **21 `scenario_id`** · **206 `run_id`** · Normal **198.810** · DDoS **93.648** · Portscan **34.503**
 - **Không dùng** `flow_stats.csv` 155k dump (nhãn portscan bẩn) và **không dùng** 20k Normal random.
 - ~38k DDoS lúc đầu là nhãn cửa sổ + leftover nmap — không phải số chính.
 - CICIDS2017 / InSDN chỉ đối chứng công khai, không train controller.
@@ -95,22 +95,22 @@ Scaler **không** nằm trong `preprocess.py`; nằm trong từng `train_*.py`.
 | **Isolation Forest** | Unsupervised | Binary Normal vs Anomaly | **Anomaly-class** | Unsupervised nhẹ |
 | **Autoencoder** | Unsupervised | Binary (MSE threshold) | **Anomaly-class** | Unsupervised học sâu |
 
-**Ngưỡng AE:** percentile 95 MSE trên Normal-TRAIN pool 79.114 ≈ **0.0014**.
+**Ngưỡng AE:** percentile 95 MSE trên Normal-TRAIN. Số ~0.0014 là pool 79k cũ — không nhắc như đã đo lại trên 326k trừ khi mở `models/autoencoder_threshold.pkl`.
 
 ## A7. Số liệu nhớ thuộc (làm tròn)
 
-**Số chính — 4 model binary LOSO (Normal vs Attack), 19 scenario, 3 poll đầu, bỏ cổng:**
+**Số chính — 4 model binary LOSO (Normal vs Attack), 21 scenario, 3 poll đầu, bỏ cổng:**
 
-| Model | Acc pooled | F1 anom | Recall scenario (min) | Normal FPR |
-|-------|------------|---------|------------------------|------------|
-| XGB | 0.919 | 0.954 | 0.907 (0.134) | 0.247 |
-| RF | 0.887 | 0.935 | 0.862 (0) | 0.192 |
-| AE | 0.083 | 0.007 | 0.102 (0) | 0.100 |
-| IF | 0.081 | 0.001 | 0.071 (0) | 0.101 |
+| Model | Acc pooled | F1 anom | Recall scenario (min) | Normal FPR mean |
+|-------|------------|---------|------------------------|-----------------|
+| RF | 0.772 | 0.775 | 0.730 (0) | 0.162 |
+| XGB | 0.752 | 0.756 | 0.722 (0) | 0.181 |
+| AE | 0.476 | 0.046 | 0.050 (0) | 0.061 |
+| IF | 0.467 | 0.000 | 0.004 (0) | 0.048 |
 
-Pooled không đứng một mình. XGB/RF sót `portscan_nmap_h4_h1`. AE/IF baseline chết. Acc 0.9999 **cấm**.
+Pooled không đứng một mình. XGB/RF sót `portscan_nmap_h4_h1` (min-recall **0**). AE/IF baseline chết. Acc 0.9999 **cấm**. 326k = thêm run trên cùng 2s6h, không phải CICIDS-scale.
 
-**Grouped-by-run (trung gian, còn overlap scenario):** RF Acc 0.987 ± 0.008 · XGB 0.982 ± 0.017.
+**Grouped-by-run (trung gian, còn overlap scenario):** RF Acc 0.993 ± 0.008 · XGB 0.994 ± 0.005.
 
 **Realtime:** poll **5 s**; block sau **3** alert liên tiếp → ~**≤15 s**; DROP `hard_timeout` **120 s**.
 
@@ -118,9 +118,9 @@ Pooled không đứng một mình. XGB/RF sót `portscan_nmap_h4_h1`. AE/IF base
 **RF Real-only CV K=5:** Acc ≈ 0.9997±0.0004 · **F1_macro ≈ 0.8994±0.1343**.
 
 **LOSO binary realtime (số generalization 4 model):**
-- XGB F1-anom 0.954 · recall attack-scenario 0.907 (min 0.134) · Normal FPR 0.247
-- RF F1-anom 0.935 · 0.862 (min 0) · FPR 0.192
-- AE/IF Acc ~0.08 — không tô hồng.
+- RF F1-anom 0.775 · recall attack-scenario 0.730 (min 0) · Normal FPR 0.162
+- XGB F1-anom 0.756 · 0.722 (min 0) · FPR 0.181
+- AE/IF Acc ~0.47 nhưng F1-anom ~0.05 / ~0 — không tô hồng.
 
 **Public CICIDS2017 3-class (bổ sung, không phải OpenFlow):**
 - 880.176 flows · Normal 662.383 · DDoS 127.175 · PortScan 90.618
@@ -234,7 +234,7 @@ Mỗi câu: **Ý trả lời ngắn** → **Câu nói miệng** → **Bẫy / đ
 ### Q14. AE threshold lấy sao? Sao không 2.355?
 
 **Nói:**  
-> 95th percentile MSE trên Normal **train** sau StandardScaler. Pool 79.114 hiện tại ≈ **0.0014**. Số 0.0473 là ngưỡng của bảng 11k cũ; 2.355 là sai thang. Threshold **không** tính trên test.  
+> 95th percentile MSE trên Normal **train** sau StandardScaler. Ngưỡng ~0.0014 thuộc pool 79k; không khẳng định đã đo lại trên 326k. Số 0.0473 là bảng 11k cũ; 2.355 là sai thang. Threshold **không** tính trên test.  
 
 ### Q15. AE Recall Anomaly = 100% nghĩa là gì? Macro thì sao?
 
@@ -372,13 +372,13 @@ Mỗi câu: **Ý trả lời ngắn** → **Câu nói miệng** → **Bẫy / đ
 # C. CHEAT SHEET 60 GIÂY (trước vào phòng)
 
 1. Làm **hệ thống SDN+ML khép kín**, không invent algo.  
-2. Data = **79.114 snapshot / 5s** (23.843 5-tuple · 19 scenario · 32 run). Không 231k. Không nói “79k phiên”.  
+2. Data = **326.961 snapshot / 5s** (113.226 5-tuple · 21 scenario · 206 run). Không 231k. Không nói “326k phiên”. Không Acc 99,91%.  
 3. SMOTE **train only** trong `preprocess.py`.  
 4. RF Acc=1.0 = **lab dễ tách**, không = production; xem CV F1-macro.  
 5. Deploy **XGB** vì **latency**.  
 6. Realtime = **`realtime_detector.py`**; monitor = thu CSV.  
-7. AE threshold **≈ 0.0014** trên Normal-train pool 79k.  
-8. Số chính = binary LOSO: XGB F1-anom 0.954 · recall scenario 0.907 (min 0.13) · Normal FPR 0.25. AE/IF ~0.08. Acc 0.9999 cấm.  
+7. AE threshold: 95th percentile Normal-train; số ~0.0014 là pool 79k cũ — đừng nói như đã đo lại trên 326k.  
+8. Số chính = binary LOSO: RF Acc 0.772 F1 0.775 min-recall 0 FPR 0.16; XGB Acc 0.752 F1 0.756 min-recall 0 FPR 0.18. Acc 0.9999 cấm.  
 
 ---
 
@@ -411,7 +411,7 @@ python controller/run_realtime.py   # demo
 
 # E. SINH TRAFFIC / THU DATA — thuộc lòng
 
-## E1. Anomaly (tập 79.114) — đã thu xong, không thu thêm dump bẩn
+## E1. Anomaly (tập 326.961) — đã thu xong, không thu thêm dump bẩn
 
 1. T1: `python controller/run_controller.py` → `monitor.py` poll **5s** `OFPFlowStatsRequest`.
 2. `dataset/current_label.txt` = `normal` | `ddos` | `portscan` (nhãn **cửa sổ**, không phải từng gói).
@@ -422,11 +422,11 @@ python controller/run_realtime.py   # demo
 4. Mỗi poll: 5-tuple + `packet_count`, `byte_count`, `duration` → tính pkt/s, byte/s, `packet_size_avg` → append `flow_stats.csv`.
 5. Cắt theo thời gian run → `dataset/independent_runs/run_*.csv` (`run_id`, `scenario_id`).
 6. `python src/merge_independent_runs.py` → **`flow_stats_grouped.csv`**.
-7. Đánh giá chính: `python src/eval_binary_realtime_scenario_held_out.py` (8 feature, bỏ cổng, 3 poll đầu, 19 scenario).
+7. Đánh giá chính: `python src/eval_binary_realtime_scenario_held_out.py` (8 feature, bỏ cổng, 3 poll đầu, 21 scenario).
 
 **Không** dùng `flow_stats.csv` 155k dump làm số chính. **Không** nút dashboard “Bắn” khi bảo vệ.
 
-## E2. Fault (đang thu) — cùng topo, file khác
+## E2. Fault (Protocol D — đã có số) — cùng topo, file khác
 
 1. T1: `python controller/run_fault_monitor.py` — **không** `run_controller.py`.
 2. T2: `sudo python3 src/collect_independent_fault_runs.py`  
@@ -438,7 +438,7 @@ python controller/run_realtime.py   # demo
 7. `python src/merge_fault_runs.py` → `dataset/fault_stats_grouped.csv`
 8. `python src/eval_fault_loso.py` — cấm `configured_*`, IP, `run_id` làm feature.
 
-12×3 = 36 run. Snapshot ≠ experiment độc lập.
+36 scenario × 9 run = **324** `run_id`. Grouped **6666** snapshot. D1 RF Acc 0,9339 / F1 0,8636. **D2 yếu:** Acc ~0,37–0,38 / F1 ~0,42. Snapshot ≠ experiment độc lập.
 
 ## E3. Demo realtime (không phải thu dataset)
 
@@ -490,15 +490,15 @@ Launcher: `run_controller.py` · `run_realtime.py` · `run_fault_monitor.py`.
 
 **ML-LFIL [15]:** rate + delay + loss trên Mininet — *hướng đo*, không phải dataset của nhóm.
 
-**Cấm nói:** Acc 99,99% · FPR=0% · production · fault Acc khi chưa có `fault_loso_summary.csv` · CICIDS train controller · “bỏ 3 poll đầu” (đúng là **giữ** 3 poll đầu).
+**Cấm nói:** Acc 99,91% / 99,99% · FPR=0% · production · “D2 đã phân loại được loại lỗi” · CICIDS train controller · “bỏ 3 poll đầu” (đúng là **giữ** 3 poll đầu).
 
 ---
 
 # C. CHEAT SHEET 60 GIÂY (trước vào phòng)
 
 1. Hai nhánh: bất thường lưu lượng **và** lỗi liên kết cùng topo — không trộn số.  
-2. Anomaly = **79.114 snapshot / 5s** (23.843 5-tuple · 19 scenario · 32 run). Không 231k.  
-3. Số chính LOSO: XGB Acc 0,92 · F1 0,95 · min recall 0,13 · FPR ~0,25. AE/IF ~0,08. Acc 0,9999 **cấm**.  
+2. Anomaly = **326.961 snapshot / 5s** (113.226 5-tuple · 21 scenario · 206 run). Không 231k.  
+3. Số chính LOSO: RF Acc 0,77 · F1 0,77 · min recall **0** · FPR ~0,16; XGB Acc 0,75 · F1 0,76. Acc 0,9999 **cấm**. D2 Acc ~0,38 **chưa giải**.  
 4. Deploy **XGB** vì latency; DROP 3 alert × 5s, timeout **120s**.  
 5. Fault: inject `s1–s2`; feature = Δ flow + port + RTT; **không** đưa `configured_loss=10` vào model.  
 6. Dữ liệu của nhóm → **nhận xét lab**, không khẳng định mạng thật.  

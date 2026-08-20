@@ -30,10 +30,24 @@ def load_data(filepath=None):
         print(f"[!] File not found: {filepath}")
         sys.exit(1)
 
-    df = pd.read_csv(filepath)
+    df = pd.read_csv(filepath, low_memory=False)
     print(f"[*] Loaded {len(df)} records from {filepath}")
     print(f"[*] Columns: {list(df.columns)}")
     print(f"[*] Label distribution:\n{df['label'].value_counts()}")
+
+    # Controller/train pool: independent OpenFlow runs only.
+    if 'run_id' in df.columns:
+        before = len(df)
+        df = df[~df['run_id'].astype(str).isin(['unknown', 'nan', '', 'None'])].copy()
+        df = df[~df['run_id'].astype(str).str.startswith('run_normal_massive_')].copy()
+        if len(df) != before:
+            print(f"[*] Dropped {before - len(df)} unknown/generated rows from train pool")
+    if 'is_synthetic' in df.columns:
+        before = len(df)
+        df = df[df['is_synthetic'].fillna(0).astype(int) == 0].copy()
+        if len(df) != before:
+            print(f"[*] Dropped {before - len(df)} synthetic/bootstrap rows from train pool")
+    print(f"[*] Train-pool labels:\n{df['label'].value_counts()}")
     return df
 
 

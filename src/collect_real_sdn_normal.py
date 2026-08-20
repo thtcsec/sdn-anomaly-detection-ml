@@ -17,6 +17,11 @@ RUNS_DIR = os.path.join(BASE_DIR, 'dataset', 'independent_runs')
 MANIFEST = os.path.join(RUNS_DIR, 'manifest.csv')
 
 def generate_sdn_normal_dataset(target_flows=20000):
+    raise SystemExit(
+        'DISABLED: script này sinh random.randint, không phải OpenFlow. '
+        'Không được dùng cho luận văn / train controller. '
+        'Thu Normal thật bằng controller/run_controller.py + ping/iperf.'
+    )
     os.makedirs(RUNS_DIR, exist_ok=True)
     print(f"[*] Bắt đầu sinh {target_flows} flow records NORMAL thực nghiệm SDN...")
 

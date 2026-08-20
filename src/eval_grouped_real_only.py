@@ -1,5 +1,8 @@
 """
-Grouped real-only evaluation (scenario-/run-isolated).
+Grouped real-only evaluation (run-isolated).
+
+INTERMEDIATE only. Same scenario_id can appear in train and test.
+Primary generalization is src/eval_scenario_held_out.py (protocol D).
 
 Rules:
   - Test folds: is_synthetic==0 AND run_id known (not unknown/legacy)

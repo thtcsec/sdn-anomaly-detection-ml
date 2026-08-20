@@ -1,2 +1,2 @@
 status,n_groups,n_rows,splitter,smote_train,legacy_benchmark,primary_conclusion
-ok,20,55515,GroupKFold(n_splits=5),False,reports/model_comparison.csv (UNCHANGED),grouped_real_only_summary.csv
+ok,206,326961,GroupKFold(n_splits=5),False,reports/model_comparison.csv (UNCHANGED),grouped_real_only_summary.csv

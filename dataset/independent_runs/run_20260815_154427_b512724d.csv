@@ -1,0 +1,1 @@
+timestamp,datapath_id,flow_id,ip_src,ip_dst,ip_proto,tp_src,tp_dst,packet_count,byte_count,duration_sec,duration_nsec,packet_count_per_sec,byte_count_per_sec,packet_size_avg,flow_duration,label,is_synthetic,source,run_id,scenario_id,capture_session_id,topology_id,traffic_tool,attack_protocol,attack_rate,attacker_count,target_host,collection_timestamp

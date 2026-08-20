@@ -300,7 +300,11 @@ def plot_tsne_visualization(X_test, y_test, n_samples=5000):
     plt.legend(markerscale=5, fontsize=12)
     plt.tight_layout()
     tsne_path = os.path.join(REPORTS_DIR, 'tsne_2d_visualization.png')
-    plt.savefig(tsne_path, dpi=150)
+    try:
+        plt.savefig(tsne_path, dpi=150)
+    except OSError:
+        tsne_path = os.path.join(REPORTS_DIR, 'tsne_2d_visualization_new.png')
+        plt.savefig(tsne_path, dpi=150)
     plt.close()
     print(f"[✓] Saved: {tsne_path}")
 

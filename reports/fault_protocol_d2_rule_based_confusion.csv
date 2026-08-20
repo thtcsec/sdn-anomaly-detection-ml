@@ -1,5 +1,5 @@
 true,normal,bandwidth,loss,delay
-normal,311,2,0,0
-bandwidth,482,7,0,0
-loss,500,0,0,0
-delay,506,0,0,0
+normal,850,40,0,0
+bandwidth,1489,8,0,0
+loss,1479,0,0,0
+delay,1504,0,0,0

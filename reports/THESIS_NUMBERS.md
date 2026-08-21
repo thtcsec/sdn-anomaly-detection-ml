@@ -55,14 +55,25 @@ LOSO pooled n_test = 5370 (`fault_protocol_d*_loso.csv` `_pooled` rows).
 
 `dataset/fault_stats_grouped_e.csv` · 1,982 snapshots · **112 `run_id`** · **36 `scenario_id`** · delay 570 · bandwidth 553 · loss 529 · normal 330.
 
-LOSO pooled n_test = 1534 (`reports/fault_protocol_e_d1_loso.csv`, `fault_protocol_e_d2_loso.csv`, `fault_protocol_e_d2_per_class.csv`).
+LOSO pooled n_test = 1534 (`reports/fault_protocol_e_d1_loso.csv`, `fault_protocol_e_d1_per_class.csv`, `fault_protocol_e_d2_loso.csv`, `fault_protocol_e_d2_per_class.csv`).
 
-| Protocol | Question | RF Acc / F1-macro | XGB | SVM (RBF) |
-|----------|----------|-------------------|-----|-----------|
-| **E D1** | detect fault vs normal | **0.981 / 0.965** | 0.976 / 0.955 | 0.968 / 0.941 |
-| **E D2** | 4-class bw/loss/delay/normal | **0.923 / 0.926** | 0.902 / 0.903 | 0.886 / 0.889 |
+D1 — five models (Normal vs Fault). IF/AE train **Normal-only** each LOSO fold; scaler fit train-fold; AE threshold = 95th percentile train-normal MSE. Keras 3 / TF 2.21 CPU. Source: `fault_protocol_e_d1_loso.csv`, `fault_protocol_e_d1_per_class.csv`.
 
-**Headline D2 = RF.** SVM is in the table and worse than RF — do not headline. IF/AE = N/A (binary unsupervised only).
+| Model | Acc | F1-macro | Recall Normal | Recall Fault |
+|-------|-----|----------|---------------|--------------|
+| Random Forest | **0.9811** | **0.9652** | 0.9213 | 0.9930 |
+| XGBoost | 0.9759 | 0.9554 | 0.9016 | 0.9906 |
+| SVM (RBF) | 0.9681 | 0.9414 | 0.8858 | 0.9844 |
+| Autoencoder | 0.5456 | 0.4899 | 0.6496 | 0.5250 |
+| Isolation Forest | 0.1382 | 0.1314 | 0.6850 | 0.0297 |
+
+D2 — 4-class. IF/AE **N/A**: unsupervised models cannot assign 4 labels (do not invent 4-class Acc).
+
+| Protocol | Question | RF Acc / F1-macro | XGB | SVM (RBF) | IF / AE |
+|----------|----------|-------------------|-----|-----------|---------|
+| **E D2** | 4-class bw/loss/delay/normal | **0.923 / 0.926** | 0.902 / 0.903 | 0.886 / 0.889 | **N/A** |
+
+**Headline D2 = RF.** SVM is in the table and worse than RF — do not headline. Unsupervised answers D1 only.
 
 RF D2 recall: Bandwidth **0.883** · Loss **0.874** · Delay **0.996** (all ≥ 0.82) · Normal 0.941.
 

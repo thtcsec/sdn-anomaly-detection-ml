@@ -76,16 +76,28 @@ Hai câu hỏi **không gộp**: D1 = phát hiện fault vs normal; D2 = 4 lớp
 
 ### Headline — Protocol E (lab 2s6h, **không** phải campus SDN)
 
-Nguồn: `dataset/fault_stats_grouped_e.csv` (**1.982** snapshot · **112 `run_id`** · **36 `scenario_id`** · delay 570 · bandwidth 553 · loss 529 · normal 330) · `reports/fault_protocol_e_d1_loso.csv` / `fault_protocol_e_d2_loso.csv` / `fault_protocol_e_d2_per_class.csv` (pooled n_test = **1534**).
+Nguồn: `dataset/fault_stats_grouped_e.csv` (**1.982** snapshot · **112 `run_id`** · **36 `scenario_id`** · delay 570 · bandwidth 553 · loss 529 · normal 330) · `reports/fault_protocol_e_d1_loso.csv` / `fault_protocol_e_d1_per_class.csv` / `fault_protocol_e_d2_loso.csv` / `fault_protocol_e_d2_per_class.csv` (pooled n_test = **1534**).
 
-| Bài | RF Acc / F1-macro | XGB | SVM (RBF) | Rule-based Acc |
-|-----|-------------------|-----|-----------|----------------|
-| **D1** Normal vs Fault | **0,981 / 0,965** | 0,976 / 0,955 | 0,968 / 0,941 | 0,495 |
-| **D2** 4 lớp | **0,923 / 0,926** | 0,902 / 0,903 | 0,886 / 0,889 | 0,411 |
+D1 — năm mô hình (Normal vs Fault). IF/AE train **Normal-only** từng fold LOSO; scaler fit train-fold; ngưỡng AE = percentile 95 MSE train-normal. Keras 3 / TF 2.21 CPU. Nguồn: `fault_protocol_e_d1_loso.csv`, `fault_protocol_e_d1_per_class.csv`.
+
+| Model | Acc | F1-macro | Recall Normal | Recall Fault |
+|-------|-----|----------|---------------|--------------|
+| Random Forest | **0,9811** | **0,9652** | 0,9213 | 0,9930 |
+| XGBoost | 0,9759 | 0,9554 | 0,9016 | 0,9906 |
+| SVM (RBF) | 0,9681 | 0,9414 | 0,8858 | 0,9844 |
+| Autoencoder | 0,5456 | 0,4899 | 0,6496 | 0,5250 |
+| Isolation Forest | 0,1382 | 0,1314 | 0,6850 | 0,0297 |
+| Rule-based | 0,4954 | 0,4814 | 1,0000 | 0,3953 |
+
+D2 — 4 lớp. IF/AE **N/A** (unsupervised không gán 4 nhãn; không bịa Acc 4-class).
+
+| Bài | RF Acc / F1-macro | XGB | SVM (RBF) | Rule Acc | IF / AE |
+|-----|-------------------|-----|-----------|----------|---------|
+| **D2** 4 lớp | **0,923 / 0,926** | 0,902 / 0,903 | 0,886 / 0,889 | 0,411 | **N/A** |
 
 Recall D2 RF (LOSO pooled): Bandwidth **0,883** · Loss **0,874** · Delay **0,996** (cả ba ≥ 0,82) · Normal 0,941.
 
-> **Headline D2 = Random Forest.** SVM nằm trong bảng, kém RF, không chiếu. IF/AE = N/A (unsupervised binary only). D2 Protocol E **được nói** trên lab Mininet 2 switch / 6 host sau khi gắn `tc` đúng cổng OVS và probe xuyên s1↔s2. **Không** suy ra campus SDN / production.
+> **Headline D2 = Random Forest.** SVM nằm trong bảng, kém RF, không chiếu. Unsupervised chỉ trả lời D1. D2 Protocol E **được nói** trên lab Mininet 2 switch / 6 host sau khi gắn `tc` đúng cổng OVS và probe xuyên s1↔s2. **Không** suy ra campus SDN / production.
 
 ### Phụ lục — Protocol D (thí nghiệm inject hỏng, **không** phải số hiện tại)
 
@@ -112,7 +124,7 @@ Anomaly LOSO binary (`reports/binary_realtime_loso_summary.csv`):
 | Autoencoder | 0,4759 | 0,0463 | 0,0495 (0) | 0,0614 / 0,0746 |
 | Isolation Forest | 0,4665 | 0,0003 | 0,0036 (0) | 0,0484 / 0,0638 |
 
-LinearSVC F1 nhỉnh RF một chút nhưng FPR Normal xấu hơn (~0,29 vs 0,16); min-recall vẫn 0. **Không** chiếu SVM như model thắng trên anomaly. Fault D2 Protocol E: SVM Acc 0,886 / F1 0,889 — kém RF 0,923 / 0,926, chỉ là cột thứ 5. IF/AE = N/A trên 4-class.
+LinearSVC F1 nhỉnh RF một chút nhưng FPR Normal xấu hơn (~0,29 vs 0,16); min-recall vẫn 0. **Không** chiếu SVM như model thắng trên anomaly. Fault D2 Protocol E: SVM Acc 0,886 / F1 0,889 — kém RF 0,923 / 0,926, chỉ là cột thứ 5. IF/AE chạy D1 (AE Acc 0,546 / IF Acc 0,138); **N/A trên D2 4-class**.
 
 ---
 
@@ -185,7 +197,7 @@ Số khóa: 880.176 · XGB/RF F1-macro ≈ 0,999 — không phải OpenFlow 5s. 
 ## 6. File số liệu
 
 - **Chính anomaly:** `reports/binary_realtime_loso_summary.csv` · `binary_realtime_loso_per_scenario.csv` · `reports/THESIS_NUMBERS.md`
-- **Chính fault E:** `reports/fault_protocol_e_d1_loso.csv` · `fault_protocol_e_d2_loso.csv` · `fault_protocol_e_d2_per_class.csv`
+- **Chính fault E:** `reports/fault_protocol_e_d1_loso.csv` · `fault_protocol_e_d1_per_class.csv` · `fault_protocol_e_d2_loso.csv` · `fault_protocol_e_d2_per_class.csv`
 - Trung gian: `reports/grouped_real_only_summary.csv` · `scenario_held_out_summary.csv`
 - Phụ lục: `reports/model_comparison.csv` · `reports/fault_protocol_d*_loso.csv` (Protocol D, broken tc)
 - Quay video: `HUONG_DAN_QUAY_VIDEO_DEMO.md`

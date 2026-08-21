@@ -453,6 +453,8 @@ mininet> h4 hping3 -S --flood -p 80 10.0.0.1   # ~15s Ctrl+C
 
 Chrome: IP WSL `:5000` nếu `127.0.0.1` refused.
 
+SVM có trên dropdown SOC; không dùng số demo (LinearSVC random-split) làm LOSO.
+
 ---
 
 # F. FILE / HÀM TRIỂN KHAI

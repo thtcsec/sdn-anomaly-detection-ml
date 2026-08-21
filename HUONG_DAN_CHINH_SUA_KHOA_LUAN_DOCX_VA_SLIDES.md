@@ -114,6 +114,8 @@ Nguồn: `dataset/fault_stats_grouped.csv` (= `fault_stats_grouped_protocol_d.cs
 
 SVM là baseline có giám sát cổ điển cho bảng so sánh. Không thay Random Forest / XGBoost trên deploy, không kỳ vọng tự chữa D2 nếu feature còn chồng.
 
+SOC dropdown: SVM có trên radio; pickle live là LinearSVC 10-feature random-split — **không** dùng số demo làm LOSO.
+
 Anomaly LOSO binary (`reports/binary_realtime_loso_summary.csv`):
 
 | Model | Acc pooled | F1 anomaly | Mean attack recall (min) | Normal FPR mean (max) |

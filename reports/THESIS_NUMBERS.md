@@ -85,4 +85,6 @@ Protocol D D2 ~0.38 stays historical (broken `tc` + same-switch iperf). Never he
 
 LinearSVC (dual=False, train cap 40k): Acc **0.7491** · F1 **0.7768** · mean attack recall 0.8524 (min **0**) · Normal FPR mean **0.2871** (max 0.5613). Do not headline over RF (better FPR). Same hole: `portscan_nmap_h4_h1`.
 
+Live SOC LinearSVC pickle is a demo baseline (random-split 10-feature); SVM có trên dropdown, không dùng số demo làm LOSO.
+
 Word cheat sheet: `HUONG_DAN_CHINH_SUA_KHOA_LUAN_DOCX_VA_SLIDES.md`.

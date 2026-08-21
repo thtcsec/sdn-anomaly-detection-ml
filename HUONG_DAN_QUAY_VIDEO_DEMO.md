@@ -123,6 +123,7 @@ Mở **⚙️ Cấu hình SOC**. Chỉ **chỉ** (không lưu nếu làm hỏng 
 - Ngưỡng 3
 - Timeout **120s**
 - Model **XGBoost - Realtime Prototype** (10-feature, ~0.33 ms/flow). Đừng đổi RF lúc quay. Không được thấy Acc 99.91%.
+- SVM (LinearSVC) có trên dropdown; không dùng số demo làm LOSO. Quay video vẫn giữ XGBoost, đừng lưu SVM.
 
 Có thể tắt/bật Auto-Mitigation một cái rồi bật lại.
 

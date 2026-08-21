@@ -6,12 +6,12 @@
 
 - Does **not** replace the 326,961 DDoS/Portscan/Normal snapshots.
 - Collect on `s1↔s2` with Mininet `tc` (bw / loss / delay). Two questions: **D1** = fault vs normal; **D2** = 4-class normal/bw/loss/delay. Do not merge the questions.
-- **Protocol E (current):** `dataset/fault_stats_grouped_e.csv` — **1,982** rows · **112** runs · **36** scenarios. LOSO pooled n_test=1534. D1 RF Acc **0.981** / F1-macro **0.965**. D2 RF Acc **0.923** / F1-macro **0.926**; XGB 0.902/0.903; SVM 0.886/0.889. RF D2 recall Bandwidth 0.883 · Loss 0.874 · Delay 0.996 (all ≥ 0.82). Headline D2 = **RF**. D2 is classifiable on this **lab** only — not campus SDN.
+- **Protocol E (current):** `dataset/fault_stats_grouped_e.csv` — **1,982** rows · **112** runs · **36** scenarios. LOSO pooled n_test=1534. D1 five models (Normal-only unsupervised, scaler train-fold, AE threshold = 95th percentile train-normal MSE): RF Acc **0.9811** / F1 **0.9652** (R_n 0.9213 · R_f 0.9930); XGB 0.9759 / 0.9554; SVM 0.9681 / 0.9414; Autoencoder 0.5456 / 0.4899 (R_n 0.6496 · R_f 0.5250); Isolation Forest 0.1382 / 0.1314 (R_n 0.6850 · R_f 0.0297). D2 RF Acc **0.923** / F1-macro **0.926**; XGB 0.902/0.903; SVM 0.886/0.889. RF D2 recall Bandwidth 0.883 · Loss 0.874 · Delay 0.996 (all ≥ 0.82). Headline D2 = **RF**. D2 is classifiable on this **lab** only — not campus SDN. Unsupervised models answer **D1 only**.
 - **Protocol D (historical / broken tc):** 36 scenarios · 324 runs · 6,666 rows — D2 Acc ~0.38. Appendix only. Never headline as current.
 - Controller: `python controller/run_fault_monitor.py` (FlowStats **delta** + PortStats). Never `run_controller.py` during fault capture.
 - Scripts: `src/collect_independent_fault_runs.py --protocol e`, `src/merge_fault_runs.py --protocol e`, `src/eval_fault_loso.py --prefix fault_protocol_e`
 - Files: `dataset/fault_stats_grouped_e.csv` (E), `dataset/fault_stats_grouped.csv` (D), `docs/FAULT_DATASET.md`
-- Fifth model: SVM (RBF on fault; LinearSVC on anomaly LOSO). Worse than RF on both tasks. IF/AE N/A on 4-class D2.
+- Fifth supervised model: SVM (RBF on fault; LinearSVC on anomaly LOSO). Worse than RF on both tasks. Isolation Forest / Autoencoder run on **D1** (binary). They stay **N/A on 4-class D2** — they cannot assign four family labels without a separate supervised head. Do not invent 4-class Acc for IF/AE.
 - Model features: `FAULT_MODEL_FEATURES`. Forbidden: labels, `configured_*`, IPs, ids.
 - Cite as lab observations. Related work: ML-LFIL on Mininet (rate / delay / loss), not as our dataset.
 

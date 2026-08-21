@@ -4,9 +4,11 @@ Protocol D/E evaluation on the fault dataset (poll snapshots).
 Does not touch the anomaly 326k pool.
 Ground-truth columns are never used as features.
 
-  D1 — Normal vs Fault (detection)
-  D2 — 4-class family (normal / bandwidth / loss / delay)
-  Models: RandomForest, XGBoost, SVM (RBF). IF/AE = N/A on 4-class.
+  D1 — Normal vs Fault (detection). Five models: RF, XGB, SVM, IsolationForest, Autoencoder.
+        IF/AE train on Normal-only of each LOSO train fold (scaler fit on that subset).
+        AE threshold = 95th percentile of train-normal reconstruction MSE (same as anomaly LOSO).
+  D2 — 4-class family (normal / bandwidth / loss / delay). RF, XGB, SVM only.
+        IF/AE = N/A: unsupervised models cannot assign 4 family labels without a supervised head.
   Rule-based baseline on the same telemetry (RTT / loss / throughput)
 
   python src/eval_fault_loso.py --data dataset/fault_stats_grouped.csv --prefix fault_protocol_d
@@ -18,10 +20,11 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import warnings
 
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import IsolationForest, RandomForestClassifier
 from sklearn.metrics import (
     accuracy_score,
     classification_report,
@@ -40,6 +43,11 @@ except ImportError:
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from provenance_schema import FAULT_FORBIDDEN_FEATURES, FAULT_MODEL_FEATURES  # noqa: E402
+
+# Keras is preferred (thesis models/). sklearn MLP is the CPU fallback if TF is absent.
+_AE_BACKEND: str | None = None
+_AE_BACKEND_NOTE = ""
+_AE_KERAS = None
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DEFAULT = os.path.join(BASE_DIR, "dataset", "fault_stats_grouped.csv")
@@ -214,6 +222,155 @@ def _loso_rule(task: str, X, y, groups) -> tuple[pd.DataFrame, np.ndarray, np.nd
     return pd.DataFrame(rows), yt_cat, yp_cat
 
 
+def _resolve_ae_backend() -> str:
+    """Prefer Keras/TF (thesis AE). Fall back to sklearn MLP. Never fake 4-class."""
+    global _AE_BACKEND, _AE_BACKEND_NOTE, _AE_KERAS
+    if _AE_BACKEND is not None:
+        return _AE_BACKEND
+    os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")
+    os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
+    os.environ.setdefault("TF_NUM_INTRAOP_THREADS", "2")
+    os.environ.setdefault("TF_NUM_INTEROP_THREADS", "1")
+    os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
+    # TF 2.21 + Keras 3: TF_USE_LEGACY_KERAS=1 breaks `from tensorflow import keras`
+    # unless tf_keras is installed. Do not set it.
+    os.environ.pop("TF_USE_LEGACY_KERAS", None)
+    print("  [autoencoder] importing keras (WSL/CPU; first import can take minutes)...", flush=True)
+    try:
+        from tensorflow import keras as tf_keras  # type: ignore
+        _AE_KERAS = tf_keras
+        _AE_BACKEND = "keras"
+        _AE_BACKEND_NOTE = "keras/tensorflow CPU (Keras 3)"
+        print(f"  [autoencoder] backend={_AE_BACKEND_NOTE}", flush=True)
+        return _AE_BACKEND
+    except Exception as exc:
+        print(f"  [autoencoder] tensorflow.keras failed: {type(exc).__name__}: {exc}", flush=True)
+    try:
+        import tf_keras as tf_keras  # type: ignore
+        _AE_KERAS = tf_keras
+        _AE_BACKEND = "keras"
+        _AE_BACKEND_NOTE = "tf_keras CPU"
+        return _AE_BACKEND
+    except ImportError:
+        pass
+    _AE_BACKEND = "sklearn"
+    _AE_BACKEND_NOTE = "sklearn MLPRegressor (TensorFlow missing in this env)"
+    return _AE_BACKEND
+
+
+def _train_normal(X_train: pd.DataFrame, y_train: pd.Series) -> pd.DataFrame:
+    """Normal-only rows of the train fold. Never mix fault into unsupervised fit."""
+    Xn = X_train.loc[y_train.astype(str) == "normal"]
+    if len(Xn) == 0:
+        raise RuntimeError("train fold has no Normal rows for unsupervised fit")
+    return Xn
+
+
+def _if_predict_fold(X_train: pd.DataFrame, y_train: pd.Series, X_test: pd.DataFrame) -> np.ndarray:
+    """IsolationForest on Normal-only; contamination=0.05 matches anomaly LOSO."""
+    Xn = _train_normal(X_train, y_train)
+    scaler = StandardScaler()
+    clf = IsolationForest(
+        n_estimators=200, contamination=0.05, random_state=42, n_jobs=1,
+    )
+    clf.fit(scaler.fit_transform(Xn))
+    pred = clf.predict(scaler.transform(X_test))
+    return np.where(pred == -1, "fault", "normal")
+
+
+def _ae_reconstruct(Xn: np.ndarray, Xt: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    backend = _resolve_ae_backend()
+    n_in = int(Xn.shape[1])
+    if backend == "keras":
+        keras = _AE_KERAS
+        try:
+            keras.backend.clear_session()
+        except Exception:
+            pass
+        if hasattr(keras, "utils") and hasattr(keras.utils, "set_random_seed"):
+            keras.utils.set_random_seed(42)
+        model = keras.Sequential([
+            keras.layers.Input(shape=(n_in,)),
+            keras.layers.Dense(16, activation="relu"),
+            keras.layers.Dense(8, activation="relu"),
+            keras.layers.Dense(4, activation="relu"),
+            keras.layers.Dense(8, activation="relu"),
+            keras.layers.Dense(16, activation="relu"),
+            keras.layers.Dense(n_in, activation="linear"),
+        ])
+        model.compile(optimizer="adam", loss="mse")
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            model.fit(Xn, Xn, epochs=20, batch_size=32, verbose=0)
+        try:
+            recon_tr = model.predict(Xn, verbose=0)
+            recon_te = model.predict(Xt, verbose=0)
+        except TypeError:
+            recon_tr = model.predict(Xn)
+            recon_te = model.predict(Xt)
+        return recon_tr, recon_te
+
+    from sklearn.neural_network import MLPRegressor
+    ae = MLPRegressor(
+        hidden_layer_sizes=(16, 8, 4, 8, 16),
+        activation="relu",
+        solver="adam",
+        max_iter=300,
+        random_state=42,
+        early_stopping=len(Xn) >= 30,
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        ae.fit(Xn, Xn)
+    return ae.predict(Xn), ae.predict(Xt)
+
+
+def _ae_predict_fold(X_train: pd.DataFrame, y_train: pd.Series, X_test: pd.DataFrame) -> np.ndarray:
+    """Autoencoder on Normal-only; threshold = 95th percentile of train-normal MSE."""
+    Xn = _train_normal(X_train, y_train)
+    scaler = StandardScaler()
+    Xn_s = scaler.fit_transform(Xn)
+    Xt_s = scaler.transform(X_test)
+    recon_tr, recon_te = _ae_reconstruct(Xn_s, Xt_s)
+    train_mse = np.mean((Xn_s - recon_tr) ** 2, axis=1)
+    test_mse = np.mean((Xt_s - recon_te) ** 2, axis=1)
+    thr = float(np.percentile(train_mse, 95))
+    return np.where(test_mse > thr, "fault", "normal")
+
+
+def _loso_unsupervised(name: str, predict_fold, X, y, groups) -> tuple[pd.DataFrame, np.ndarray, np.ndarray]:
+    logo = LeaveOneGroupOut()
+    dummy = np.zeros(len(y))
+    rows = []
+    yt_all, yp_all = [], []
+    y = y.astype(str)
+    for train_idx, test_idx in logo.split(dummy, dummy, groups):
+        sc = groups.iloc[test_idx].iloc[0]
+        if name == "autoencoder":
+            print(f"    ae fold held_out={sc} n_test={len(test_idx)}", flush=True)
+        pred = predict_fold(X.iloc[train_idx], y.iloc[train_idx], X.iloc[test_idx])
+        yt = y.iloc[test_idx].to_numpy()
+        yt_all.append(yt)
+        yp_all.append(pred)
+        rows.append({
+            "model": name,
+            "held_out_scenario": sc,
+            "n_test": int(len(test_idx)),
+            "accuracy": float(accuracy_score(yt, pred)),
+            "f1_macro": float(f1_score(yt, pred, average="macro", zero_division=0)),
+        })
+    yt_cat = np.concatenate(yt_all)
+    yp_cat = np.concatenate(yp_all)
+    rows.append({
+        "model": name,
+        "held_out_scenario": "_pooled",
+        "n_test": int(len(yt_cat)),
+        "accuracy": float(accuracy_score(yt_cat, yp_cat)),
+        "f1_macro": float(f1_score(yt_cat, yp_cat, average="macro", zero_division=0)),
+    })
+    return pd.DataFrame(rows), yt_cat, yp_cat
+
+
 def _per_class(yt, yp, labels) -> pd.DataFrame:
     p, r, f, s = precision_recall_fscore_support(yt, yp, labels=labels, zero_division=0)
     return pd.DataFrame({
@@ -268,6 +425,26 @@ def _run_task(tag: str, X, y, groups, labels, prefix: str) -> None:
         pooled[name] = (yt, yp)
         row = tbl[tbl["held_out_scenario"] == "_pooled"].iloc[0]
         print(f"  {name:15s}  Acc={row.accuracy:.4f}  F1-macro={row.f1_macro:.4f}")
+    if tag == "d1":
+        tbl, yt, yp = _loso_unsupervised(
+            "isolation_forest", _if_predict_fold, X, y, groups,
+        )
+        frames.append(tbl)
+        pooled["isolation_forest"] = (yt, yp)
+        row = tbl[tbl["held_out_scenario"] == "_pooled"].iloc[0]
+        print(f"  {'isolation_forest':15s}  Acc={row.accuracy:.4f}  F1-macro={row.f1_macro:.4f}")
+        try:
+            backend = _resolve_ae_backend()
+            print(f"  [autoencoder] backend={backend} ({_AE_BACKEND_NOTE})")
+            tbl, yt, yp = _loso_unsupervised(
+                "autoencoder", _ae_predict_fold, X, y, groups,
+            )
+            frames.append(tbl)
+            pooled["autoencoder"] = (yt, yp)
+            row = tbl[tbl["held_out_scenario"] == "_pooled"].iloc[0]
+            print(f"  {'autoencoder':15s}  Acc={row.accuracy:.4f}  F1-macro={row.f1_macro:.4f}")
+        except Exception as exc:
+            print(f"  {'autoencoder':15s}  SKIP — {type(exc).__name__}: {exc}")
     task = "d1" if tag == "d1" else "d2"
     tbl, yt, yp = _loso_rule(task, X, y, groups)
     frames.append(tbl)
@@ -282,12 +459,12 @@ def _run_task(tag: str, X, y, groups, labels, prefix: str) -> None:
                 "n_test": 0,
                 "accuracy": np.nan,
                 "f1_macro": np.nan,
-                "note": "N/A — unsupervised binary only",
+                "note": "N/A — unsupervised answers D1 only; cannot assign 4-class labels",
             }
             for m in ("isolation_forest", "autoencoder")
         ])
         frames.append(na)
-        print("  isolation_forest / autoencoder  N/A — unsupervised binary only")
+        print("  isolation_forest / autoencoder  N/A — unsupervised D1 only, not 4-class")
 
     summary = pd.concat(frames, ignore_index=True)
     _write(summary, f"{prefix}_{tag}_loso.csv")
@@ -315,6 +492,11 @@ def main() -> None:
         "--prefix",
         default="",
         help="Report filename prefix (default: fault_protocol_e if csv has protocol=e else fault_protocol_d)",
+    )
+    ap.add_argument(
+        "--skip-d2",
+        action="store_true",
+        help="Only regenerate D1 (keeps existing D2 CSVs). Default runs both.",
     )
     args = ap.parse_args()
 
@@ -348,8 +530,10 @@ def main() -> None:
 
     y1 = y4.where(y4 == "normal", "fault")
     _run_task("d1", X4, y1, groups, ("normal", "fault"), prefix)
-    _run_task("d2", X4, y4, groups, FAMILIES, prefix)
+    if not args.skip_d2:
+        _run_task("d2", X4, y4, groups, FAMILIES, prefix)
     print("[!] Results are observations on this Mininet fault testbed only.")
+    print("[!] Unsupervised IF/AE answer D1 (binary) only; D2 4-class stays N/A.")
     print("[!] Do not claim 4-class type classification unless D2 F1-macro ≥ 0.70 "
           "and Bandwidth/Loss/Delay recall are all ≥ 0.50.")
 

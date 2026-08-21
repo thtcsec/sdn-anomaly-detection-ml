@@ -73,8 +73,9 @@ Poll 5 s. Three consecutive source-level alerts → OpenFlow DROP, hard_timeout 
 | File | Use |
 |------|-----|
 | `reports/binary_realtime_loso_summary.csv` | Primary anomaly table (5 models; headline **RF**) |
-| `reports/fault_protocol_e_d1_loso.csv` | Fault E D1 (detect) |
-| `reports/fault_protocol_e_d2_loso.csv` | Fault E D2 4-class (headline **RF** 0.923 / 0.926; lab only) |
+| `reports/fault_protocol_e_d1_loso.csv` | Fault E D1, 5 models (RF/XGB/SVM + IF/AE; AE Keras 3 CPU) |
+| `reports/fault_protocol_e_d1_per_class.csv` | D1 recalls (Normal / Fault) |
+| `reports/fault_protocol_e_d2_loso.csv` | Fault E D2 4-class (headline **RF** 0.923 / 0.926; IF/AE = N/A; lab only) |
 | `reports/fault_protocol_e_d2_per_class.csv` | E D2 per-class recall (BW/Loss/Delay ≥ 0.82) |
 | `reports/fault_protocol_d1_loso.csv` | Protocol D detection (appendix) |
 | `reports/fault_protocol_d2_loso.csv` | Protocol D 4-class ~0.38 (failed injection; appendix) |

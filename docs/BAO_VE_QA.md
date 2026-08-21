@@ -3,10 +3,10 @@
 **Đề tài:** Phát hiện bất thường và phân loại lỗi mạng SDN bằng học máy  
 **Nhóm:** Trịnh Hoàng Tú · Trần Minh Thiện | HUFLIT · An ninh mạng · K29  
 **GVHD:** ThS. Cao Tiến Thành  
-**Khớp số overnight 20/08/2026:** anomaly 326.961 / 206 run / 21 scenario; fault Protocol D 6666 / 324 / 36. Số chính: `reports/binary_realtime_loso_summary.csv`.
+**Khớp số 21/08/2026:** anomaly 326.961 / 206 run / 21 scenario (N 198.810 · DDoS 93.648 · PS 34.503). Fault **Protocol E** 1.982 / 112 run / 36 scenario. Protocol D 6666 / 324 / 36 = phụ lục. Số chính anomaly: `reports/binary_realtime_loso_summary.csv` (headline RF). Số chính fault: `reports/fault_protocol_e_d2_loso.csv` (headline RF).
 
 **Cách dùng:** 15 phút đọc mục **0 + E + F**; Q&A mục B toạc miệng.  
-Số anomaly: `reports/binary_realtime_loso_summary.csv`. Fault: chỉ nói sau `merge_fault_runs.py` có file thật.
+Số anomaly: `reports/binary_realtime_loso_summary.csv`. Fault E: `reports/fault_protocol_e_d*_loso.csv`. Không nói Protocol D ~0,38 như kết quả hiện tại.
 
 ---
 
@@ -17,7 +17,7 @@ Hai nhánh **cùng topology** Mininet 2SW/6H, **không trộn CSV / không trộ
 | Nhánh | Câu đề tài | Dữ liệu | Đánh giá | Prototype |
 |-------|------------|---------|----------|-----------|
 | An ninh (anomaly) | phát hiện bất thường | 326.961 snapshot · 206 run · 21 scenario · N/DDoS/Portscan | LOSO binary 8 feature | `realtime_detector.py` XGB + DROP |
-| Lỗi liên kết (fault) | phân loại lỗi mạng | 6666 snapshot · 324 run · 36 scenario trên `s1↔s2` | D1 phát hiện / D2 4-class (yếu) | **chưa** gắn DROP; chỉ thu + phân loại offline |
+| Lỗi liên kết (fault) | phân loại lỗi mạng | **E:** 1.982 snapshot · 112 run · 36 scenario | D1 RF 0,981/0,965 · **D2 RF 0,923/0,926 (lab)** | **chưa** gắn DROP; chỉ thu + phân loại offline. Không campus SDN |
 
 **Bảng 1 (khái niệm) — bắt buộc thuộc:**
 
@@ -426,19 +426,20 @@ python controller/run_realtime.py   # demo
 
 **Không** dùng `flow_stats.csv` 155k dump làm số chính. **Không** nút dashboard “Bắn” khi bảo vệ.
 
-## E2. Fault (Protocol D — đã có số) — cùng topo, file khác
+## E2. Fault — hai câu D1/D2; headline = Protocol E
 
 1. T1: `python controller/run_fault_monitor.py` — **không** `run_controller.py`.
-2. T2: `sudo python3 src/collect_independent_fault_runs.py`  
-   Inject `tc` trên **s1↔s2**: B 50/20/10 Mbit · L 1/5/10% · D 20/50/100ms · N1–N3 baseline.
-3. Traffic cross-switch: ping h1→h4, iperf TCP, HTTP, UDP iperf (mixed).
-4. Probe: ping RTT/loss + iperf throughput/jitter mỗi ~5s.
-5. PortStats: `rx/tx_bytes`, `rx/tx_dropped`, `rx/tx_errors` → delta, bps, drop_rate.
-6. Flow: **cửa sổ** `Δpacket/Δt`, không chỉ `packet_count/duration` lifetime.
-7. `python src/merge_fault_runs.py` → `dataset/fault_stats_grouped.csv`
-8. `python src/eval_fault_loso.py` — cấm `configured_*`, IP, `run_id` làm feature.
+2. T2: `sudo PYTHONPATH=/usr/lib/python3/dist-packages python3 src/collect_independent_fault_runs.py --protocol e --repeat 3`  
+   Inject **explicit `tc`** trên cổng OVS `s1-eth*`/`s2-eth*` (không `Intf.config`). BW 1–5 Mbit · Loss 5–20% · Delay 50–200 ms · Normal ping/http/tcp/udp/mixed.
+3. Probe **h6→h1** (bắt buộc xuyên s1↔s2): ping RTT/loss + iperf TCP/UDP.
+4. PortStats OVS `rx/tx_dropped` trên lab này vẫn 0 khi netem drop — loss nhìn qua `probe_loss_pct`.
+5. Flow: **cửa sổ** `Δpacket/Δt`, không chỉ lifetime.
+6. `python src/merge_fault_runs.py --protocol e` → `dataset/fault_stats_grouped_e.csv`
+7. `python src/eval_fault_loso.py --data dataset/fault_stats_grouped_e.csv --prefix fault_protocol_e` — cấm `configured_*`, IP, `run_id`.
 
-36 scenario × 9 run = **324** `run_id`. Grouped **6666** snapshot. D1 RF Acc 0,9339 / F1 0,8636. **D2 yếu:** Acc ~0,37–0,38 / F1 ~0,42. Snapshot ≠ experiment độc lập.
+**Protocol E (hiện tại):** 1.982 snapshot · 112 `run_id` · 36 scenario. D1 RF **0,981 / 0,965**. D2 RF **0,923 / 0,926** (XGB 0,902/0,903 · SVM 0,886/0,889). Recall BW/Loss/Delay RF 0,883 / 0,874 / 0,996. Headline D2 = **RF**. Được nói trên **lab 2s6h**, không campus.
+
+**Protocol D (phụ lục, inject hỏng):** 6666 · 324 run · 36 scen. D2 Acc ~0,38 vì `tc` không gắn + probe cùng switch. **Cấm** đọc như số hiện tại.
 
 ## E3. Demo realtime (không phải thu dataset)
 
@@ -464,7 +465,7 @@ Chrome: IP WSL `:5000` nếu `127.0.0.1` refused.
 | Dashboard | `dashboard/app.py` | đọc `live_stats.json`, `alerts.json` |
 | Fault Flow+Port+Δ | `controller/fault_monitor.py` | `flow_stats_reply_handler`, `port_stats_reply_handler` |
 | Inject s1–s2 | `src/fault_link.py` | `apply_core_fault`, `clear_core_qos` |
-| Thu fault 12×3 | `src/collect_independent_fault_runs.py` | `_scenarios`, `_traffic`, `_probe_loop` |
+| Thu fault Protocol E | `src/collect_independent_fault_runs.py` | `--protocol e`, `_scenarios`, `_probe_loop` |
 | Schema / cấm leakage | `src/provenance_schema.py` | `FEATURE_COLS`, `FAULT_MODEL_FEATURES`, `FAULT_FORBIDDEN_FEATURES` |
 | Preprocess anomaly | `src/preprocess.py` | `load_data` (lọc synthetic), SMOTE **chỉ** 80/20 |
 | LOSO 4 model | `src/eval_binary_realtime_scenario_held_out.py` | |
@@ -484,13 +485,13 @@ Launcher: `run_controller.py` · `run_realtime.py` · `run_fault_monitor.py`.
 
 **PortStats:** `rx_dropped/tx_dropped` sát packet loss trên port s1–s2.
 
-**Bốn model (baseline, không mới):** RF bagging [3] · XGB boosting + regularize [4] · IF path length [5] · AE reconstruction error [7]. Deploy XGB vì ~0,33 ms/flow.
+**Năm model:** RF / XGB / SVM (có giám sát) · IF / AE (không giám sát, chỉ binary). Headline anomaly LOSO = **RF** (không SVM: FPR cao). Headline fault D2 E = **RF**. Deploy realtime vẫn XGB vì ~0,44 ms/flow. IF/AE fail lab anomaly; N/A trên D2 4-class.
 
 **LOSO:** giữ nguyên 1 `scenario_id` làm test. Random 80/20 Acc ~1 vì rò cùng 5-tuple poll 5s.
 
 **ML-LFIL [15]:** rate + delay + loss trên Mininet — *hướng đo*, không phải dataset của nhóm.
 
-**Cấm nói:** Acc 99,91% / 99,99% · FPR=0% · production · “D2 đã phân loại được loại lỗi” · CICIDS train controller · “bỏ 3 poll đầu” (đúng là **giữ** 3 poll đầu).
+**Cấm nói:** Acc 99,91% / 99,99% · FPR=0% · production / campus SDN · “D2 Protocol D ~0,38 là kết quả hiện tại” · CICIDS train controller · “bỏ 3 poll đầu” (đúng là **giữ** 3 poll đầu). Được nói: D2 Protocol E RF Acc 0,923 trên **lab**.
 
 ---
 
@@ -498,9 +499,9 @@ Launcher: `run_controller.py` · `run_realtime.py` · `run_fault_monitor.py`.
 
 1. Hai nhánh: bất thường lưu lượng **và** lỗi liên kết cùng topo — không trộn số.  
 2. Anomaly = **326.961 snapshot / 5s** (113.226 5-tuple · 21 scenario · 206 run). Không 231k.  
-3. Số chính LOSO: RF Acc 0,77 · F1 0,77 · min recall **0** · FPR ~0,16; XGB Acc 0,75 · F1 0,76. Acc 0,9999 **cấm**. D2 Acc ~0,38 **chưa giải**.  
+3. Số chính anomaly LOSO: **RF** Acc 0,7724 · F1 0,7746 · min recall **0** · FPR ~0,16. XGB 0,7520 / 0,7556. SVM Acc 0,7491 nhưng FPR ~0,29 — không chiếu. Acc 0,9999 **cấm**. Fault E D2 **RF** Acc 0,923 / F1 0,926 (lab only). Protocol D ~0,38 = phụ lục.  
 4. Deploy **XGB** vì latency; DROP 3 alert × 5s, timeout **120s**.  
-5. Fault: inject `s1–s2`; feature = Δ flow + port + RTT; **không** đưa `configured_loss=10` vào model.  
+5. Fault: hai câu D1 vs D2; Protocol E gắn `tc` đúng OVS + probe h6→h1; **không** đưa `configured_*` vào model.  
 6. Dữ liệu của nhóm → **nhận xét lab**, không khẳng định mạng thật.  
 7. Không invent thuật toán.  
 8. Demo gõ `mininet>`, không bấm 3 nút Bắn.

@@ -49,7 +49,7 @@ Phải viết ngay dưới bảng:
 
 ---
 
-## 2. Bảng 4 model — DUY NHẤT được chiếu là Kết quả
+## 2. Bảng model — DUY NHẤT được chiếu là Kết quả (headline = Random Forest)
 
 Nguồn: `reports/binary_realtime_loso_summary.csv` (pool 326.961 · **21** scenario). **Không** dùng bảng LOSO cũ 79k (XGB Acc 0,9191 / F1 0,9544 / min-recall 0,1342).
 
@@ -66,18 +66,53 @@ Cùng bài: **Normal vs Attack** · LOSO 21 scenario · 3 poll đầu/5-tuple ·
 
 > Acc/F1 pooled không đứng một mình. Trên protocol LOSO mới, RF hơi cao hơn XGB, nhưng **min attack recall = 0** (cả hai sót `portscan_nmap_h4_h1`, 149 snapshot). Normal FPR trung bình ~0,16–0,18 (max ~0,29–0,32). AE/IF thất bại trên lab này và chỉ giữ làm baseline. Accuracy ~0,999 của random-flow split phản ánh rò cùng 5-tuple khi poll 5 giây, không dùng để suy rộng. LOSO min-recall = 0 là điểm yếu phải nói thẳng.
 
+**Headline anomaly LOSO = Random Forest** (Acc 0,7724 / F1 0,7746 / FPR mean 0,1616). LinearSVC F1 nhỉnh hơn một chút nhưng FPR Normal xấu hơn (~0,29) — **không** chiếu SVM. XGBoost chỉ thắng latency (~0,44 ms). AE/IF thất bại trên lab (binary only). **Không** dùng Acc ~0,999 random-split.
+
 Deploy realtime vẫn XGBoost prototype (latency ~0,44 ms trên `model_comparison.csv`). Candidate 8-feature **không** bật DROP vì FPR Normal.
 
-## 2b. Fault — hai câu hỏi, không trộn vào anomaly
+## 2b. Fault — hai câu hỏi D1 vs D2, không trộn vào anomaly
 
-Nguồn: `dataset/fault_stats_grouped.csv` (6666 snapshot · **324 `run_id`** · **36 `scenario_id`**) · `reports/fault_protocol_d1_loso.csv` / `fault_protocol_d2_loso.csv` (pooled n_test = 5370).
+Hai câu hỏi **không gộp**: D1 = phát hiện fault vs normal; D2 = 4 lớp normal / bandwidth / loss / delay.
 
-| Protocol | Bài | RF Acc / F1-macro | XGB Acc / F1-macro | Rule-based Acc |
-|----------|-----|-------------------|--------------------|----------------|
-| **D1** | Normal vs Fault (phát hiện) | **0,9339 / 0,8636** | 0,9272 / 0,8527 | 0,1598 |
-| **D2** | 4 lớp normal/bw/loss/delay | 0,3726 / 0,4168 | **0,3793 / 0,4200** | 0,1598 |
+### Headline — Protocol E (lab 2s6h, **không** phải campus SDN)
 
-> D1: phát hiện lỗi liên kết trên testbed là nhận xét được. **D2 chưa giải được** — Acc ~0,37–0,38 / F1-macro ~0,42, chỉ nhỉnh random 4-lớp (~0,25), không đủ để khẳng định phân loại loại lỗi. Không trộn số D1/D2 với bảng anomaly.
+Nguồn: `dataset/fault_stats_grouped_e.csv` (**1.982** snapshot · **112 `run_id`** · **36 `scenario_id`** · delay 570 · bandwidth 553 · loss 529 · normal 330) · `reports/fault_protocol_e_d1_loso.csv` / `fault_protocol_e_d2_loso.csv` / `fault_protocol_e_d2_per_class.csv` (pooled n_test = **1534**).
+
+| Bài | RF Acc / F1-macro | XGB | SVM (RBF) | Rule-based Acc |
+|-----|-------------------|-----|-----------|----------------|
+| **D1** Normal vs Fault | **0,981 / 0,965** | 0,976 / 0,955 | 0,968 / 0,941 | 0,495 |
+| **D2** 4 lớp | **0,923 / 0,926** | 0,902 / 0,903 | 0,886 / 0,889 | 0,411 |
+
+Recall D2 RF (LOSO pooled): Bandwidth **0,883** · Loss **0,874** · Delay **0,996** (cả ba ≥ 0,82) · Normal 0,941.
+
+> **Headline D2 = Random Forest.** SVM nằm trong bảng, kém RF, không chiếu. IF/AE = N/A (unsupervised binary only). D2 Protocol E **được nói** trên lab Mininet 2 switch / 6 host sau khi gắn `tc` đúng cổng OVS và probe xuyên s1↔s2. **Không** suy ra campus SDN / production.
+
+### Phụ lục — Protocol D (thí nghiệm inject hỏng, **không** phải số hiện tại)
+
+Nguồn: `dataset/fault_stats_grouped.csv` (= `fault_stats_grouped_protocol_d.csv`) · 6666 snapshot · 324 run · 36 scenario · delay 1864 · bandwidth 1857 · loss 1839 · normal 1106 · pooled n_test = 5370.
+
+| Bài | RF Acc / F1-macro | XGB | Rule Acc |
+|-----|-------------------|-----|----------|
+| D1 | 0,9339 / 0,8636 | 0,9272 / 0,8527 | 0,1598 |
+| D2 | 0,3726 / 0,4168 | 0,3793 / 0,4200 | 0,1598 |
+
+> Protocol D: `tc` không gắn lên OVS + probe iperf cùng switch → D2 Acc ~0,38. **Cấm** đưa ~0,38 làm kết quả hiện tại. Giữ như lịch sử / bài học thu thập.
+
+## 2c. SVM — model thứ 5 (baseline, không thay RF/XGB)
+
+SVM là baseline có giám sát cổ điển cho bảng so sánh. Không thay Random Forest / XGBoost trên deploy, không kỳ vọng tự chữa D2 nếu feature còn chồng.
+
+Anomaly LOSO binary (`reports/binary_realtime_loso_summary.csv`):
+
+| Model | Acc pooled | F1 anomaly | Mean attack recall (min) | Normal FPR mean (max) |
+|-------|------------|------------|--------------------------|------------------------|
+| Random Forest | **0,7724** | 0,7746 | 0,7301 (**0**) | **0,1616 / 0,2928** |
+| XGBoost | 0,7520 | 0,7556 | 0,7223 (**0**) | 0,1805 / 0,3150 |
+| LinearSVC | 0,7491 | **0,7768** | 0,8524 (**0**) | 0,2871 / 0,5613 |
+| Autoencoder | 0,4759 | 0,0463 | 0,0495 (0) | 0,0614 / 0,0746 |
+| Isolation Forest | 0,4665 | 0,0003 | 0,0036 (0) | 0,0484 / 0,0638 |
+
+LinearSVC F1 nhỉnh RF một chút nhưng FPR Normal xấu hơn (~0,29 vs 0,16); min-recall vẫn 0. **Không** chiếu SVM như model thắng trên anomaly. Fault D2 Protocol E: SVM Acc 0,886 / F1 0,889 — kém RF 0,923 / 0,926, chỉ là cột thứ 5. IF/AE = N/A trên 4-class.
 
 ---
 
@@ -122,15 +157,15 @@ Số khóa: 880.176 · XGB/RF F1-macro ≈ 0,999 — không phải OpenFlow 5s. 
 
 1. Chương dataset: 326.961 **snapshot** / 113.226 5-tuple / 21 scenario / 206 run. Giữ 11.283 và 79.114 như lịch sử.
 2. Không xóa câu “DDoS từng chỉ 6 mẫu thật”.
-3. Thay bảng 4 model bằng **mục 2** (LOSO mới: RF Acc 0,7724 · XGB 0,7520 · min-recall **0**). Xóa Acc 0,9999 / AE 0,98 / bảng LOSO 79k khỏi bảng chính.
-4. Thêm đoạn hạn chế: Mininet 1 topo 2s6h; 326k ≠ đa dạng CICIDS; sót `portscan_nmap_h4_h1` (min-recall 0); FPR Normal ~0,16–0,32; AE/IF fail; D2 4-class yếu; chưa production.
+3. Thay bảng kết quả bằng **mục 2** (LOSO: RF Acc 0,7724 · XGB 0,7520 · LinearSVC Acc 0,7491 FPR xấu hơn · min-recall **0**). SVM là cột thứ 5, không phải model thắng. Xóa Acc 0,9999 / AE 0,98 / bảng LOSO 79k khỏi bảng chính.
+4. Thêm đoạn hạn chế: Mininet 1 topo 2s6h; 326k ≠ đa dạng CICIDS; sót `portscan_nmap_h4_h1` (min-recall 0); FPR Normal ~0,16–0,32; AE/IF fail; D2 Protocol E chỉ lab (không campus); Protocol D ~0,38 là thí nghiệm hỏng; chưa production.
 5. Realtime: poll 5s · 3 polling reply / nguồn · DROP `hard_timeout` **120s** (không viết 60s). Không Acc 99,91%.
 6. PCA/t-SNE: lab tách lớp → giải thích Acc random cao. Không bịa “chồng lấn mạnh”.
 7. 3 lớp: một đoạn “phát hiện binary ổn hơn phân loại DDoS vs Portscan khi bỏ cổng thô”.
 8. Không viết zero-day, không viết IDS tổng quát.
 9. InSDN = thực nghiệm bổ sung SDN-security, **không** thay benchmark chính/realtime (dán đoạn 3c).
 10. CICIDS2017 = phụ lục intrusion detection, **không** dùng đánh giá pipeline SDN / os-ken (dán đoạn 3c).
-11. Fault: dán mục **2b**. D1 được nói; **D2 chưa giải**.
+11. Fault: dán mục **2b**. Hai câu D1 vs D2. Headline = Protocol E (RF D2 Acc 0,923 / F1 0,926). Protocol D ~0,38 chỉ phụ lục. D2 E = lab only, không campus SDN.
 
 ---
 
@@ -139,9 +174,9 @@ Số khóa: 880.176 · XGB/RF F1-macro ≈ 0,999 — không phải OpenFlow 5s. 
 | Slide | Đúng | Sai |
 |-------|------|-----|
 | Dataset | 326.961 snapshot 5s · 113.226 5-tuple · 21 scenario · 206 run | “326k phiên” / CICIDS-scale / 79k như số hiện tại |
-| Kết quả | Bảng mục 2 + min recall **0** + FPR | Acc 0,9999 / LOSO 79k cũ / “4 model đều tốt” |
-| Fault | D1 Acc ~0,93 · **D2 Acc ~0,37 F1 ~0,42** | “đã phân loại được loại lỗi” |
-| Hạn chế | Mininet 2s6h · min-recall 0 · FPR ~0,16–0,32 · D2 yếu | Production / zero-day |
+| Kết quả | Bảng mục 2 + mục 2c SVM + min recall **0** + FPR | Acc 0,9999 / LOSO 79k cũ / “5 model đều tốt” |
+| Fault | **E D2 RF Acc 0,923 F1 0,926** (lab) · D1 E RF 0,981/0,965 · D = phụ lục ~0,38 | “D2 campus/production” / Acc 0,999 / Protocol D ~0,38 như số hiện tại |
+| Hạn chế | Mininet 2s6h · min-recall 0 · FPR ~0,16–0,32 · D2 E chỉ lab | Campus SDN / production / zero-day |
 | Realtime | Prototype XGB · poll 5s · DROP 120s | Acc 99,91% / Candidate robust đã bật |
 | Phụ lục | 0,9999 = leakage · InSDN/CICIDS không train controller | Acc 1,000 tuyệt đối |
 
@@ -149,9 +184,10 @@ Số khóa: 880.176 · XGB/RF F1-macro ≈ 0,999 — không phải OpenFlow 5s. 
 
 ## 6. File số liệu
 
-- **Chính:** `reports/binary_realtime_loso_summary.csv` · `binary_realtime_loso_per_scenario.csv` · `reports/THESIS_NUMBERS.md`
+- **Chính anomaly:** `reports/binary_realtime_loso_summary.csv` · `binary_realtime_loso_per_scenario.csv` · `reports/THESIS_NUMBERS.md`
+- **Chính fault E:** `reports/fault_protocol_e_d1_loso.csv` · `fault_protocol_e_d2_loso.csv` · `fault_protocol_e_d2_per_class.csv`
 - Trung gian: `reports/grouped_real_only_summary.csv` · `scenario_held_out_summary.csv`
-- Phụ lục: `reports/model_comparison.csv`
+- Phụ lục: `reports/model_comparison.csv` · `reports/fault_protocol_d*_loso.csv` (Protocol D, broken tc)
 - Quay video: `HUONG_DAN_QUAY_VIDEO_DEMO.md`
 
 ---

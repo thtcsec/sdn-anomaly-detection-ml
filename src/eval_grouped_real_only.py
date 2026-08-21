@@ -40,6 +40,7 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import GroupKFold, LeaveOneGroupOut
 from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.svm import LinearSVC
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from provenance_schema import FEATURE_COLS  # noqa: E402
@@ -85,8 +86,23 @@ def _choose_splitter(n_groups: int, min_groups: int = MIN_GROUPS):
     return GroupKFold(n_splits=5), 'GroupKFold(n_splits=5)'
 
 
-def _fit_predict_supervised(model, X_tr, y_tr, X_te, use_smote: bool):
+def _cap_train_xy(X, y, cap: int):
+    if cap <= 0 or len(y) <= cap:
+        return X, y
+    rs = np.random.RandomState(42)
+    idx = []
+    for label in np.unique(y):
+        lab = np.where(y == label)[0]
+        n = max(1, int(round(cap * len(lab) / len(y))))
+        n = min(n, len(lab))
+        idx.append(rs.choice(lab, size=n, replace=False))
+    take = np.concatenate(idx)
+    return X[take], y[take]
+
+
+def _fit_predict_supervised(model, X_tr, y_tr, X_te, use_smote: bool, train_cap: int = 0):
     scaler = StandardScaler()
+    X_tr, y_tr = _cap_train_xy(X_tr, y_tr, train_cap)
     X_tr_s = scaler.fit_transform(X_tr)
     X_te_s = scaler.transform(X_te)
     if use_smote:
@@ -184,6 +200,9 @@ def main() -> None:
     ap.add_argument('--with-smote-train', action='store_true',
                     help='Optional experiment: SMOTE inside train fold only')
     ap.add_argument('--min-groups', type=int, default=MIN_GROUPS)
+    ap.add_argument('--linearsvc-only', action='store_true',
+                    help='Run only LinearSVC and merge into grouped_real_only_*.csv')
+    ap.add_argument('--svm-train-cap', type=int, default=40000)
     args = ap.parse_args()
     os.makedirs(REPORTS, exist_ok=True)
 
@@ -251,6 +270,16 @@ def main() -> None:
         )
     except ImportError:
         print('[!] xgboost not installed — skip XGBoost')
+    if args.linearsvc_only:
+        models = {
+            'LinearSVC': LinearSVC(
+                C=1.0, dual=False, max_iter=4000, class_weight='balanced', random_state=42,
+            ),
+        }
+    else:
+        models['LinearSVC'] = LinearSVC(
+            C=1.0, dual=False, max_iter=4000, class_weight='balanced', random_state=42,
+        )
 
     fold_rows = []
     y_true_all = []
@@ -265,11 +294,14 @@ def main() -> None:
 
         # Supervised models
         for name, proto in models.items():
-            # fresh clone via re-init params
             if name == 'RandomForest':
                 clf = RandomForestClassifier(
                     n_estimators=200, max_depth=12, min_samples_leaf=2,
                     class_weight='balanced_subsample', random_state=42, n_jobs=-1,
+                )
+            elif name == 'LinearSVC':
+                clf = LinearSVC(
+                    C=1.0, dual=False, max_iter=4000, class_weight='balanced', random_state=42,
                 )
             else:
                 from xgboost import XGBClassifier
@@ -278,7 +310,10 @@ def main() -> None:
                     subsample=0.8, colsample_bytree=0.8, random_state=42,
                     eval_metric='mlogloss',
                 )
-            y_pred = _fit_predict_supervised(clf, X_tr, y_tr, X_te, args.with_smote_train)
+            cap = args.svm_train_cap if name == 'LinearSVC' else 0
+            y_pred = _fit_predict_supervised(
+                clf, X_tr, y_tr, X_te, args.with_smote_train, train_cap=cap,
+            )
             if name == 'RandomForest':
                 y_true_all.extend(y_te.tolist())
                 y_pred_rf_all.extend(y_pred.tolist())
@@ -316,30 +351,35 @@ def main() -> None:
                 **report,
             })
 
-        if_metrics = _eval_if(X_tr, y_tr, X_te, y_te, le)
-        if if_metrics:
-            fold_rows.append({
-                'model': 'IsolationForest',
-                'fold': fold,
-                'splitter': split_name,
-                'smote_train': False,
-                'test_groups': ';'.join(g_te),
-                **if_metrics,
-            })
+        if not args.linearsvc_only:
+            if_metrics = _eval_if(X_tr, y_tr, X_te, y_te, le)
+            if if_metrics:
+                fold_rows.append({
+                    'model': 'IsolationForest',
+                    'fold': fold,
+                    'splitter': split_name,
+                    'smote_train': False,
+                    'test_groups': ';'.join(g_te),
+                    **if_metrics,
+                })
 
-        ae_metrics = _try_autoencoder(X_tr, y_tr, X_te, y_te, le)
-        if ae_metrics:
-            fold_rows.append({
-                'model': 'Autoencoder',
-                'fold': fold,
-                'splitter': split_name,
-                'smote_train': False,
-                'test_groups': ';'.join(g_te),
-                **ae_metrics,
-            })
+            ae_metrics = _try_autoencoder(X_tr, y_tr, X_te, y_te, le)
+            if ae_metrics:
+                fold_rows.append({
+                    'model': 'Autoencoder',
+                    'fold': fold,
+                    'splitter': split_name,
+                    'smote_train': False,
+                    'test_groups': ';'.join(g_te),
+                    **ae_metrics,
+                })
 
     fold_df = pd.DataFrame(fold_rows)
     fold_path = os.path.join(REPORTS, 'grouped_real_only_per_fold.csv')
+    if args.linearsvc_only and os.path.isfile(fold_path):
+        old = pd.read_csv(fold_path)
+        old = old[old['model'] != 'LinearSVC']
+        fold_df = pd.concat([old, fold_df], ignore_index=True)
     fold_df.to_csv(fold_path, index=False)
 
     summary = (

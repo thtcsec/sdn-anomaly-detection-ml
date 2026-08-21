@@ -57,26 +57,31 @@ Poll 5 s. Three consecutive source-level alerts → OpenFlow DROP, hard_timeout 
 
 ## Data
 
-| File | Role |
-|------|------|
-| `dataset/flow_stats_grouped.csv` | Clean independent pool (326,961 poll rows, 206 runs, 21 scenarios) |
-| `dataset/fault_stats_grouped.csv` | Link-fault pool (6,666 rows, 324 runs, 36 scenarios) — not mixed with anomaly |
-| `dataset/train.csv` / `test.csv` | Legacy random-flow split (appendix only) |
-| `dataset/flow_stats.csv` | Not used. Monitor dump; do not cite. |
+| File | Role | Rows | Labels / groups |
+|------|------|------|-----------------|
+| `dataset/flow_stats_grouped.csv` | Anomaly pool (headline) | **326,961** | normal **198,810** · ddos **93,648** · portscan **34,503** · **206** `run_id` · **21** `scenario_id` |
+| `dataset/fault_stats_grouped_e.csv` | Fault Protocol E (current D2) | **1,982** | delay 570 · bandwidth 553 · loss 529 · normal 330 · **112** `run_id` · **36** `scenario_id` |
+| `dataset/fault_stats_grouped.csv` | Fault Protocol D (historical / broken `tc`) | 6,666 | delay 1864 · bandwidth 1857 · loss 1839 · normal 1106 · 324 run · 36 scenario |
+| `dataset/fault_stats_grouped_protocol_d.csv` | Archive copy of Protocol D | 6,666 | identical to `fault_stats_grouped.csv` |
+| `dataset/train.csv` / `test.csv` | Legacy random-flow split (appendix only) | — | Do not cite Acc ~0.999 |
+| `dataset/flow_stats.csv` | Monitor dump | — | Not used. Do not cite. |
 
-326,961 is the number of 5-second OpenFlow snapshots, not independent sessions. Same 2s6h lab, more runs — not CICIDS-scale diversity. Headline eval: `reports/binary_realtime_loso_summary.csv` (LOSO, 21 scenarios). Do not cite random-split Acc ~0.999.
+326,961 is the number of 5-second OpenFlow snapshots, not independent sessions. Same 2s6h lab, more runs — not CICIDS-scale diversity. Headline anomaly eval: `reports/binary_realtime_loso_summary.csv` (LOSO, 21 scenarios, **RF**). Headline fault D2: `reports/fault_protocol_e_d2_loso.csv` (**RF** Acc 0.923 / F1-macro 0.926, lab only). Do not cite random-split Acc ~0.999. Do not cite Protocol D D2 ~0.38 as current.
 
 ## Results to cite
 
 | File | Use |
 |------|-----|
-| `reports/binary_realtime_loso_summary.csv` | Primary 4-model table |
-| `reports/fault_protocol_d1_loso.csv` | Fault detection (D1) |
-| `reports/fault_protocol_d2_loso.csv` | Fault 4-class (D2; still weak) |
+| `reports/binary_realtime_loso_summary.csv` | Primary anomaly table (5 models; headline **RF**) |
+| `reports/fault_protocol_e_d1_loso.csv` | Fault E D1 (detect) |
+| `reports/fault_protocol_e_d2_loso.csv` | Fault E D2 4-class (headline **RF** 0.923 / 0.926; lab only) |
+| `reports/fault_protocol_e_d2_per_class.csv` | E D2 per-class recall (BW/Loss/Delay ≥ 0.82) |
+| `reports/fault_protocol_d1_loso.csv` | Protocol D detection (appendix) |
+| `reports/fault_protocol_d2_loso.csv` | Protocol D 4-class ~0.38 (failed injection; appendix) |
 | `reports/environment_lock.txt` | Package versions |
 | `reports/model_comparison.csv` | Appendix (random-flow leakage) |
-| `HUONG_DAN_CHINH_SUA_KHOA_LUAN_DOCX_VA_SLIDES.md` | Word / slide numbers |
-| `HUONG_DAN_QUAY_VIDEO_DEMO.md` | Demo video |
+| `docs/FAULT_DATASET.md` | Fault collection + D vs E |
+| `docs/THESIS_EVALUATION_PROTOCOL.md` | Evaluation protocol |
 
 ## Layout
 

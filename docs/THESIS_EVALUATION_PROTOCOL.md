@@ -5,10 +5,13 @@
 ### Fault dataset (second pool — same topology, not a public dump)
 
 - Does **not** replace the 326,961 DDoS/Portscan/Normal snapshots.
-- Collect on `s1↔s2` with Mininet `tc` (bw / loss / delay). Protocol D: **36** scenarios · **324** runs · **6,666** grouped rows.
+- Collect on `s1↔s2` with Mininet `tc` (bw / loss / delay). Two questions: **D1** = fault vs normal; **D2** = 4-class normal/bw/loss/delay. Do not merge the questions.
+- **Protocol E (current):** `dataset/fault_stats_grouped_e.csv` — **1,982** rows · **112** runs · **36** scenarios. LOSO pooled n_test=1534. D1 RF Acc **0.981** / F1-macro **0.965**. D2 RF Acc **0.923** / F1-macro **0.926**; XGB 0.902/0.903; SVM 0.886/0.889. RF D2 recall Bandwidth 0.883 · Loss 0.874 · Delay 0.996 (all ≥ 0.82). Headline D2 = **RF**. D2 is classifiable on this **lab** only — not campus SDN.
+- **Protocol D (historical / broken tc):** 36 scenarios · 324 runs · 6,666 rows — D2 Acc ~0.38. Appendix only. Never headline as current.
 - Controller: `python controller/run_fault_monitor.py` (FlowStats **delta** + PortStats). Never `run_controller.py` during fault capture.
-- Scripts: `src/collect_independent_fault_runs.py`, `src/merge_fault_runs.py`, `src/eval_fault_loso.py`
-- Files: `dataset/fault_runs/`, `dataset/fault_stats_grouped.csv`, `docs/FAULT_DATASET.md`
+- Scripts: `src/collect_independent_fault_runs.py --protocol e`, `src/merge_fault_runs.py --protocol e`, `src/eval_fault_loso.py --prefix fault_protocol_e`
+- Files: `dataset/fault_stats_grouped_e.csv` (E), `dataset/fault_stats_grouped.csv` (D), `docs/FAULT_DATASET.md`
+- Fifth model: SVM (RBF on fault; LinearSVC on anomaly LOSO). Worse than RF on both tasks. IF/AE N/A on 4-class D2.
 - Model features: `FAULT_MODEL_FEATURES`. Forbidden: labels, `configured_*`, IPs, ids.
 - Cite as lab observations. Related work: ML-LFIL on Mininet (rate / delay / loss), not as our dataset.
 
@@ -25,20 +28,23 @@
 - Outputs: `reports/scenario_held_out_summary.csv`, `scenario_held_out_per_scenario.csv`, `scenario_inventory.csv`, `scenario_held_out_STATUS.csv`
 - **Do NOT cite** random-split Acc 0.9999 or grouped-by-run Acc ≈ 0.98 as generalization.
 
-#### Fair 4-model binary table (locked)
+#### Fair 5-model binary table (locked)
 
 `python src/eval_binary_realtime_scenario_held_out.py` ·
 `reports/binary_realtime_loso_summary.csv`
 
-Same task for all four: Normal vs Attack, LOSO 21 scenarios, first 3 polls,
-no raw ports, no SMOTE.
+Same task: Normal vs Attack, LOSO 21 scenarios, first 3 polls,
+no raw ports, no SMOTE. Headline = **Random Forest**. LinearSVC is a 5th supervised baseline (not the deploy model; higher Normal FPR).
 
 | Model | Acc pooled | F1 anom | Attack-scenario recall (min) | Normal FPR mean |
 |-------|------------|---------|------------------------------|-----------------|
 | Random Forest | 0.7724 | 0.7746 | 0.7301 (0) | 0.1616 |
 | XGBoost | 0.7520 | 0.7556 | 0.7223 (0) | 0.1805 |
+| LinearSVC | 0.7491 | 0.7768 | 0.8524 (0) | 0.2871 |
 | Autoencoder | 0.4759 | 0.0463 | 0.0495 (0) | 0.0614 |
 | Isolation Forest | 0.4665 | 0.0003 | 0.0036 (0) | 0.0484 |
+
+Do not headline LinearSVC: FPR is worse than RF. All supervised models still miss `portscan_nmap_h4_h1` (min recall **0**).
 
 Pooled scores are not the sole headline. XGB/RF miss `portscan_nmap_h4_h1` (min recall **0**).
 AE/IF fail on this lab. 326k is more independent runs on the same 2s6h Mininet lab, not

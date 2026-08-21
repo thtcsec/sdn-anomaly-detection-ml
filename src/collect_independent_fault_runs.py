@@ -1,14 +1,16 @@
 """
-Thu Fault Dataset trên CÙNG topology 2s6h — không đụng pool anomaly 79.114.
+Thu Fault Dataset trên CÙNG topology 2s6h — không đụng pool anomaly 326k.
 
-Inject tc trên link s1↔s2. Ground truth (fault_label, configured_*) ghi metadata,
-không phải feature.
+Inject tc trên link s1↔s2 (explicit ``tc`` netem/HTB, not Intf.config).
+Ground truth (fault_label, configured_*) ghi metadata, không phải feature.
 
 T1: python controller/run_fault_monitor.py
 T2: sudo PYTHONPATH=/usr/lib/python3/dist-packages python3 src/collect_independent_fault_runs.py
 
   --protocol legacy   12 scenario × 3 run (bộ 392 snapshot cũ)
-  --protocol d        Protocol D: nhiều mức severity × workload, duration dài hơn
+  --protocol d        Protocol D (historical): mild overlapping severities; D2 Acc ~0.38
+  --protocol e        Protocol E (headline D2): separable BW/loss/delay + mixed TCP/UDP
+                      + probes that actually cross s1↔s2
 """
 
 from __future__ import annotations
@@ -26,7 +28,12 @@ from datetime import datetime
 from typing import Any, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from fault_link import apply_core_fault, clear_core_qos, core_link, core_port_meta  # noqa: E402
+from fault_link import (  # noqa: E402
+    apply_core_fault,
+    clear_core_qos,
+    core_link,
+    core_port_meta,
+)
 from lab_safety import assert_lab_targets, assert_no_default_route_hint  # noqa: E402
 from provenance_schema import (  # noqa: E402
     ALLOWED_LAB_IPV4,
@@ -165,11 +172,79 @@ def _scenarios_protocol_d(duration_sec: int) -> list[dict[str, Any]]:
     return out
 
 
+def _scenarios_protocol_e(duration_sec: int) -> list[dict[str, Any]]:
+    """Separable 4-class grid (still 36 scenario_id). Same 2s6h topology.
+
+    Protocol D failed because (1) tc never attached to OVS ports and (2) mild
+    1% / 10ms / 20Mbps settings plus same-switch probes look identical.
+
+    Protocol E keeps 4 labels (normal / bandwidth / loss / delay):
+      BW   1–5 Mbit/s   — rate ceiling, ping still low-loss / low-RTT
+      Loss 5–20 %       — random drops, RTT not inflated to delay-class
+      Delay 50–200 ms   — RTT jump, loss stays near 0
+    Workloads always include TCP+UDP on the fault pairs (``tu`` / ``mixed``).
+    Scenario ids are E_* so merge can keep Protocol D dirs on disk untouched.
+    """
+    base = dict(duration_sec=duration_sec, affected_link=FAULT_AFFECTED_LINK)
+    out: list[dict[str, Any]] = []
+
+    for sid, severity, traffic in (
+        ("EN_ping", "ping", "ping"),
+        ("EN_http", "http", "http"),
+        ("EN_tcp", "iperf_tcp", "iperf_tcp"),
+        ("EN_udp", "iperf_udp", "iperf_udp"),
+        ("EN_low", "mixed_low", "mixed_low"),
+        ("EN_high", "mixed_high", "mixed_high"),
+    ):
+        out.append({
+            **base, "scenario_id": sid, "fault_label": "normal",
+            "fault_family": "normal", "fault_severity": severity,
+            "configured_bw": None, "configured_loss": None, "configured_delay": None,
+            "traffic": traffic,
+        })
+
+    for bw in (1.0, 2.0, 3.0, 4.0, 5.0):
+        tag = str(int(bw))
+        for suffix, traffic in (("tu", "tu"), ("m", "mixed")):
+            out.append({
+                **base, "scenario_id": f"EB_{tag}M_{suffix}",
+                "fault_label": "bandwidth", "fault_family": "bandwidth",
+                "fault_severity": f"{tag}Mbit",
+                "configured_bw": bw, "configured_loss": None, "configured_delay": None,
+                "traffic": traffic,
+            })
+
+    for loss in (5.0, 8.0, 12.0, 16.0, 20.0):
+        tag = str(int(loss))
+        for suffix, traffic in (("tu", "tu"), ("m", "mixed")):
+            out.append({
+                **base, "scenario_id": f"EL_{tag}pct_{suffix}",
+                "fault_label": "loss", "fault_family": "loss",
+                "fault_severity": f"{tag}pct",
+                "configured_bw": None, "configured_loss": loss, "configured_delay": None,
+                "traffic": traffic,
+            })
+
+    for delay_ms in (50, 80, 120, 160, 200):
+        for suffix, traffic in (("tu", "tu"), ("m", "mixed")):
+            out.append({
+                **base, "scenario_id": f"ED_{delay_ms}ms_{suffix}",
+                "fault_label": "delay", "fault_family": "delay",
+                "fault_severity": f"{delay_ms}ms",
+                "configured_bw": None, "configured_loss": None,
+                "configured_delay": f"{delay_ms}ms",
+                "traffic": traffic,
+            })
+    return out
+
+
 def _scenarios(duration_sec: int, protocol: str) -> list[dict[str, Any]]:
     if protocol == "legacy":
         return _scenarios_legacy(duration_sec)
     if protocol == "d":
         return _scenarios_protocol_d(duration_sec)
+    if protocol == "e":
+        return _scenarios_protocol_e(duration_sec)
     raise ValueError(f"unknown protocol {protocol}")
 
 
@@ -206,10 +281,14 @@ def _parse_ping(text: str) -> dict[str, Optional[float]]:
     }
 
 
-def _parse_iperf_csv(text: str) -> tuple[Optional[float], Optional[float]]:
-    """iperf 2 `-y C`: last data row, bps in field 9 (0-based 8). UDP jitter field 10."""
+def _parse_iperf_csv(text: str) -> tuple[Optional[float], Optional[float], Optional[float]]:
+    """iperf 2 `-y C`: last data row.
+
+    TCP: field 8 = bps. UDP also has jitter (9), lost (10), total (11), %loss (12).
+    """
     throughput = None
     jitter = None
+    lost_pct = None
     for line in text.strip().splitlines():
         parts = line.split(",")
         if len(parts) < 9:
@@ -224,17 +303,26 @@ def _parse_iperf_csv(text: str) -> tuple[Optional[float], Optional[float]]:
                 jitter = float(parts[9])
             except ValueError:
                 pass
-    return throughput, jitter
+        if len(parts) >= 13:
+            try:
+                lost_pct = float(str(parts[12]).replace("%", ""))
+            except ValueError:
+                lost_pct = None
+        if lost_pct is None and len(parts) >= 12:
+            try:
+                lost, total = float(parts[10]), float(parts[11])
+                if total > 0:
+                    lost_pct = 100.0 * lost / total
+            except ValueError:
+                pass
+    return throughput, jitter, lost_pct
 
 
 def _start_servers(hosts: dict) -> None:
-    for hname, port_tcp, port_udp in (
-        ("h4", 5001, 5002),
-        ("h5", 5003, 5004),
-        ("h6", 5005, 5006),
-    ):
-        _hcmd(hosts[hname], f"iperf -s -p {port_tcp} >/dev/null 2>&1 &")
-        _hcmd(hosts[hname], f"iperf -s -u -p {port_udp} >/dev/null 2>&1 &")
+    """iperf/HTTP on every host so probes h6→h1 actually cross s1↔s2."""
+    for hname in ("h1", "h2", "h3", "h4", "h5", "h6"):
+        _hcmd(hosts[hname], "iperf -s -p 5001 >/dev/null 2>&1 &")
+        _hcmd(hosts[hname], "iperf -s -u -p 5002 >/dev/null 2>&1 &")
         _hcmd(hosts[hname], "python3 -m http.server 8080 >/dev/null 2>&1 &")
     time.sleep(1)
 
@@ -244,11 +332,11 @@ def _pair(repeat_idx: int) -> tuple[str, str]:
 
 
 def _tcp_port(dst_ip: str) -> int:
-    return {"10.0.0.4": 5001, "10.0.0.5": 5003, "10.0.0.6": 5005}[dst_ip]
+    return 5001
 
 
 def _udp_port(dst_ip: str) -> int:
-    return {"10.0.0.4": 5002, "10.0.0.5": 5004, "10.0.0.6": 5006}[dst_ip]
+    return 5002
 
 
 def _traffic(hosts: dict, kind: str, duration: int, repeat_idx: int = 0) -> None:
@@ -266,16 +354,16 @@ def _traffic(hosts: dict, kind: str, duration: int, repeat_idx: int = 0) -> None
             f"timeout {t} bash -c 'while true; do "
             f"wget -q -O /dev/null http://{dst}:8080/ || true; sleep 0.5; done' >/dev/null 2>&1 &",
         ))
-    if kind in ("iperf_tcp", "mixed", "mixed_high"):
+    if kind in ("iperf_tcp", "mixed", "mixed_high", "tu"):
         cmds.append((src, f"timeout {t} iperf -c {dst} -p {p_tcp} -t {t} >/dev/null 2>&1 &"))
     if kind == "mixed_low":
         cmds.append((src, f"timeout {t} iperf -c {dst} -p {p_tcp} -t {t} -b 2M >/dev/null 2>&1 &"))
-    if kind in ("iperf_udp", "mixed", "mixed_high"):
-        udp_bw = "8M" if kind == "mixed_high" else "2M"
+    if kind in ("iperf_udp", "mixed", "mixed_high", "tu"):
+        udp_bw = "8M" if kind in ("mixed_high", "tu") else "2M"
         cmds.append((src, f"timeout {t} iperf -u -c {dst} -p {p_udp} -t {t} -b {udp_bw} >/dev/null 2>&1 &"))
     if kind == "iperf_tcp" and src == "h1":
         # second TCP flow on a different pair so bandwidth faults still show under load
-        cmds.append(("h2", f"timeout {t} iperf -c 10.0.0.5 -p 5003 -t {t} >/dev/null 2>&1 &"))
+        cmds.append(("h2", f"timeout {t} iperf -c 10.0.0.5 -p 5001 -t {t} >/dev/null 2>&1 &"))
 
     for hname, cmd in cmds:
         assert_no_default_route_hint(cmd)
@@ -283,20 +371,26 @@ def _traffic(hosts: dict, kind: str, duration: int, repeat_idx: int = 0) -> None
 
 
 def _probe_loop(hosts: dict, samples: list, stop: threading.Event) -> None:
-    """Probe only from h6 so it does not share Mininet shells with traffic hosts."""
+    """Probe h6→h1 so ICMP/iperf CROSS the impaired s1↔s2 link.
+
+    Protocol D probed h6→h4 (both on s2): RTT~0.03ms and ~40Gbps for every class.
+    """
+    dst = "10.0.0.1"
+    assert_lab_targets([dst], context="fault-probe")
     while not stop.is_set():
         ts = _now()
-        ping_out = _hcmd(hosts["h6"], "ping -c 4 -W 1 10.0.0.1")
+        ping_out = _hcmd(hosts["h6"], f"ping -c 8 -W 2 {dst}")
         parsed = _parse_ping(ping_out)
-        iperf_out = _hcmd(hosts["h6"], "iperf -c 10.0.0.4 -t 2 -y C 2>/dev/null")
-        udp_out = _hcmd(hosts["h6"], "iperf -u -c 10.0.0.4 -p 5002 -t 2 -b 1M -y C 2>/dev/null")
-        thr, _ = _parse_iperf_csv(iperf_out)
-        _, jitter = _parse_iperf_csv(udp_out)
+        iperf_out = _hcmd(hosts["h6"], f"iperf -c {dst} -p 5001 -t 2 -y C 2>/dev/null")
+        udp_out = _hcmd(hosts["h6"], f"iperf -u -c {dst} -p 5002 -t 2 -b 2M -y C 2>/dev/null")
+        thr, _, _ = _parse_iperf_csv(iperf_out)
+        _, jitter, udp_lost = _parse_iperf_csv(udp_out)
         samples.append({
             "timestamp": ts,
             **parsed,
             "throughput_mbps": thr,
             "jitter_ms": jitter,
+            "udp_lost_pct": udp_lost,
         })
         stop.wait(5.0)
 
@@ -336,7 +430,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--repeat", type=int, default=3, help="Independent runs per scenario")
     ap.add_argument("--duration", type=int, default=0, help="Seconds per run (0 = protocol default)")
-    ap.add_argument("--protocol", choices=("legacy", "d"), default="d")
+    ap.add_argument("--protocol", choices=("legacy", "d", "e"), default="e")
     ap.add_argument("--only", default="", help="Comma scenario ids, e.g. N1,B1,L2")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
@@ -347,7 +441,7 @@ def main() -> None:
         with open(MANIFEST, "w", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(MANIFEST_HEADER)
 
-    duration = args.duration or (45 if args.protocol == "legacy" else 90)
+    duration = args.duration or (45 if args.protocol == "legacy" else 75 if args.protocol == "e" else 90)
     scs = _scenarios(duration, args.protocol)
     if args.only:
         wanted = {x.strip() for x in args.only.split(",") if x.strip()}
@@ -382,6 +476,7 @@ def main() -> None:
         print(f"    waiting for {FLOW_LIVE}")
         sys.exit(1)
 
+    from mininet.link import TCLink
     from mininet.log import setLogLevel
     from mininet.net import Mininet
     from mininet.node import OVSKernelSwitch, RemoteController
@@ -390,7 +485,12 @@ def main() -> None:
     from topology.custom_topo import SDNAnomalyTopo
 
     setLogLevel("info")
-    net = Mininet(topo=SDNAnomalyTopo(), controller=None, switch=OVSKernelSwitch)
+    net = Mininet(
+        topo=SDNAnomalyTopo(),
+        controller=None,
+        switch=OVSKernelSwitch,
+        link=TCLink,
+    )
     net.addController("c0", controller=RemoteController, ip="127.0.0.1", port=6633)
     net.start()
     time.sleep(5)
@@ -405,12 +505,13 @@ def main() -> None:
 
     try:
         for sc, repeat_idx in plan:
-            apply_core_fault(
+            qdisc = apply_core_fault(
                 link,
                 bw_mbit=sc["configured_bw"],
                 delay=sc["configured_delay"],
                 loss_pct=sc["configured_loss"],
             )
+            print(f"    qdisc {qdisc}")
             time.sleep(2)
             run_id = f"fault_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
             start = _now()
@@ -452,6 +553,7 @@ def main() -> None:
                 "traffic": sc["traffic"],
                 "traffic_pair": f"{src_h}->{dst_ip}",
                 **ports,
+                "qdisc": qdisc,
                 "notes": "gt metadata; do not use configured_* or ids as features",
             }
             run_dir = os.path.join(RUNS_DIR, run_id)

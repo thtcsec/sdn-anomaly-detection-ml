@@ -1,18 +1,21 @@
 """
-Protocol D evaluation on the fault dataset (poll snapshots).
+Protocol D/E evaluation on the fault dataset (poll snapshots).
 
-Does not touch the anomaly 79.114 pool.
+Does not touch the anomaly 326k pool.
 Ground-truth columns are never used as features.
 
   D1 — Normal vs Fault (detection)
   D2 — 4-class family (normal / bandwidth / loss / delay)
+  Models: RandomForest, XGBoost, SVM (RBF). IF/AE = N/A on 4-class.
   Rule-based baseline on the same telemetry (RTT / loss / throughput)
 
-  python src/eval_fault_loso.py
+  python src/eval_fault_loso.py --data dataset/fault_stats_grouped.csv --prefix fault_protocol_d
+  python src/eval_fault_loso.py --data dataset/fault_stats_grouped_e.csv --prefix fault_protocol_e
 """
 
 from __future__ import annotations
 
+import argparse
 import os
 import sys
 
@@ -28,6 +31,7 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import LeaveOneGroupOut
 from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.svm import SVC
 
 try:
     from xgboost import XGBClassifier
@@ -38,20 +42,20 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from provenance_schema import FAULT_FORBIDDEN_FEATURES, FAULT_MODEL_FEATURES  # noqa: E402
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA = os.path.join(BASE_DIR, "dataset", "fault_stats_grouped.csv")
+DATA_DEFAULT = os.path.join(BASE_DIR, "dataset", "fault_stats_grouped.csv")
 OUT_DIR = os.path.join(BASE_DIR, "reports")
 FAMILIES = ("normal", "bandwidth", "loss", "delay")
 
 
-def _load() -> pd.DataFrame:
-    if not os.path.exists(DATA):
+def _load(path: str) -> pd.DataFrame:
+    if not os.path.exists(path):
         raise FileNotFoundError(
-            f"Missing {DATA}. Collect then merge:\n"
+            f"Missing {path}. Collect then merge:\n"
             "  python controller/run_fault_monitor.py\n"
-            "  sudo python3 src/collect_independent_fault_runs.py --protocol d\n"
-            "  python src/merge_fault_runs.py"
+            "  sudo python3 src/collect_independent_fault_runs.py --protocol e\n"
+            "  python src/merge_fault_runs.py --protocol e"
         )
-    df = pd.read_csv(DATA)
+    df = pd.read_csv(path)
     leaked = [c for c in FAULT_FORBIDDEN_FEATURES if c in FAULT_MODEL_FEATURES]
     if leaked:
         raise RuntimeError(f"schema leak: {leaked}")
@@ -102,24 +106,33 @@ def _rule_thresholds(X: pd.DataFrame, y: pd.Series) -> dict[str, float]:
     nmask = y.astype(str) == "normal"
     if int(nmask.sum()) < 3:
         nmask = pd.Series(True, index=y.index)
-    loss = pd.to_numeric(X.loc[nmask, "probe_loss_pct"], errors="coerce") if "probe_loss_pct" in X else pd.Series([0.0])
-    rtt = pd.to_numeric(X.loc[nmask, "rtt_mean_ms"], errors="coerce") if "rtt_mean_ms" in X else pd.Series([1.0])
-    thr = pd.to_numeric(X.loc[nmask, "throughput_mbps"], errors="coerce") if "throughput_mbps" in X else pd.Series([10.0])
+
+    def col(name, fill):
+        if name not in X.columns:
+            return pd.Series([fill])
+        return pd.to_numeric(X.loc[nmask, name], errors="coerce")
+
+    loss = col("probe_loss_pct", 0.0)
+    uloss = col("udp_lost_pct", 0.0)
+    rtt = col("rtt_mean_ms", 1.0)
+    thr = col("throughput_mbps", 10.0)
     return {
         "loss": float(max(2.0, np.nanpercentile(loss.fillna(0.0), 95))),
-        "rtt": float(max(15.0, np.nanpercentile(rtt.fillna(0.0), 95) * 2.0)),
+        "uloss": float(max(3.0, np.nanpercentile(uloss.fillna(0.0), 95))),
+        "rtt": float(max(20.0, np.nanpercentile(rtt.fillna(0.0), 95) * 2.0)),
         "thr": float(max(0.5, np.nanpercentile(thr.fillna(np.nan), 25) * 0.5)) if thr.notna().any() else 1.0,
     }
 
 
 def _rule_predict_4(X: pd.DataFrame, thr: dict[str, float]) -> np.ndarray:
     loss = pd.to_numeric(X.get("probe_loss_pct", 0), errors="coerce").fillna(0.0).to_numpy()
+    uloss = pd.to_numeric(X.get("udp_lost_pct", 0), errors="coerce").fillna(0.0).to_numpy()
     rtt = pd.to_numeric(X.get("rtt_mean_ms", 0), errors="coerce").fillna(0.0).to_numpy()
     tput = pd.to_numeric(X.get("throughput_mbps", np.nan), errors="coerce").to_numpy()
     pred = np.full(len(X), "normal", dtype=object)
     pred[np.nan_to_num(tput, nan=np.inf) <= thr["thr"]] = "bandwidth"
     pred[rtt >= thr["rtt"]] = "delay"
-    pred[loss >= thr["loss"]] = "loss"
+    pred[(loss >= thr["loss"]) | (uloss >= thr.get("uloss", 3.0))] = "loss"
     return pred
 
 
@@ -229,6 +242,10 @@ def _write(df: pd.DataFrame, name: str) -> str:
 def _factories(n_class: int):
     out = [
         ("random_forest", lambda: RandomForestClassifier(n_estimators=200, random_state=42)),
+        (
+            "svm",
+            lambda: SVC(kernel="rbf", C=1.0, gamma="scale", class_weight="balanced"),
+        ),
     ]
     if XGBClassifier is None:
         return out
@@ -241,7 +258,7 @@ def _factories(n_class: int):
     return out
 
 
-def _run_task(tag: str, X, y, groups, labels) -> None:
+def _run_task(tag: str, X, y, groups, labels, prefix: str) -> None:
     print(f"\n=== Protocol {tag.upper()} | classes={list(labels)} | n={len(y)} ===")
     frames = []
     pooled = {}
@@ -257,11 +274,25 @@ def _run_task(tag: str, X, y, groups, labels) -> None:
     pooled["rule_based"] = (yt, yp)
     row = tbl[tbl["held_out_scenario"] == "_pooled"].iloc[0]
     print(f"  {'rule_based':15s}  Acc={row.accuracy:.4f}  F1-macro={row.f1_macro:.4f}")
+    if tag == "d2":
+        na = pd.DataFrame([
+            {
+                "model": m,
+                "held_out_scenario": "_pooled",
+                "n_test": 0,
+                "accuracy": np.nan,
+                "f1_macro": np.nan,
+                "note": "N/A — unsupervised binary only",
+            }
+            for m in ("isolation_forest", "autoencoder")
+        ])
+        frames.append(na)
+        print("  isolation_forest / autoencoder  N/A — unsupervised binary only")
 
     summary = pd.concat(frames, ignore_index=True)
-    _write(summary, f"fault_protocol_{tag}_loso.csv")
+    _write(summary, f"{prefix}_{tag}_loso.csv")
     if tag == "d2":
-        _write(summary, "fault_loso_summary.csv")
+        _write(summary, f"{prefix}_loso_summary.csv")
 
     class_rows = []
     for name, (yt, yp) in pooled.items():
@@ -270,19 +301,42 @@ def _run_task(tag: str, X, y, groups, labels) -> None:
         class_rows.append(pc)
         cm = _confusion(yt, yp, labels)
         cm.index.name = "true"
-        path = os.path.join(OUT_DIR, f"fault_protocol_{tag}_{name}_confusion.csv")
+        path = os.path.join(OUT_DIR, f"{prefix}_{tag}_{name}_confusion.csv")
         cm.to_csv(path)
         print(f"  confusion {name} -> {path}")
         print(classification_report(yt, yp, labels=labels, zero_division=0))
-    _write(pd.concat(class_rows, ignore_index=True), f"fault_protocol_{tag}_per_class.csv")
+    _write(pd.concat(class_rows, ignore_index=True), f"{prefix}_{tag}_per_class.csv")
 
 
 def main() -> None:
-    raw = _load()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--data", default=DATA_DEFAULT)
+    ap.add_argument(
+        "--prefix",
+        default="",
+        help="Report filename prefix (default: fault_protocol_e if csv has protocol=e else fault_protocol_d)",
+    )
+    args = ap.parse_args()
+
+    raw = _load(args.data)
     df = _steady_state(raw)
+    proto_vals = (
+        sorted(df["protocol"].astype(str).str.lower().unique())
+        if "protocol" in df.columns
+        else []
+    )
+    prefix = args.prefix
+    if not prefix:
+        if proto_vals == ["e"]:
+            prefix = "fault_protocol_e"
+        elif proto_vals == ["d"]:
+            prefix = "fault_protocol_d"
+        else:
+            prefix = "fault_protocol"
     print(
         f"[*] raw snapshots={len(raw)}  steady={len(df)}  "
-        f"runs={df['run_id'].nunique()}  scenarios={df['scenario_id'].nunique()}"
+        f"runs={df['run_id'].nunique()}  scenarios={df['scenario_id'].nunique()}  "
+        f"protocol={proto_vals}  prefix={prefix}"
     )
     print("[*] families:\n", df["fault_family"].value_counts().to_string())
     if df["scenario_id"].nunique() < 4:
@@ -293,10 +347,11 @@ def main() -> None:
     print(f"[*] features ({len(cols)}): {cols}")
 
     y1 = y4.where(y4 == "normal", "fault")
-    _run_task("d1", X4, y1, groups, ("normal", "fault"))
-    _run_task("d2", X4, y4, groups, FAMILIES)
+    _run_task("d1", X4, y1, groups, ("normal", "fault"), prefix)
+    _run_task("d2", X4, y4, groups, FAMILIES, prefix)
     print("[!] Results are observations on this Mininet fault testbed only.")
-    print("[!] 4-class Acc near 0.25 is not a deployable classifier — D1 is the detection question.")
+    print("[!] Do not claim 4-class type classification unless D2 F1-macro ≥ 0.70 "
+          "and Bandwidth/Loss/Delay recall are all ≥ 0.50.")
 
 
 if __name__ == "__main__":

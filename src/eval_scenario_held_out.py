@@ -38,6 +38,7 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import LeaveOneGroupOut
 from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.svm import LinearSVC
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from provenance_schema import FEATURE_COLS  # noqa: E402
@@ -92,11 +93,25 @@ def last_poll_per_tuple(df: pd.DataFrame) -> pd.DataFrame:
     return out.groupby(present, as_index=False, dropna=False).tail(1).reset_index(drop=True)
 
 
-def _fit_predict(model, X_tr, y_tr, X_te):
+def _cap_idx(n, y, cap: int):
+    if cap <= 0 or n <= cap:
+        return np.arange(n)
+    rs = np.random.RandomState(42)
+    idx = []
+    for label in np.unique(y):
+        lab = np.where(y == label)[0]
+        take = max(1, int(round(cap * len(lab) / n)))
+        take = min(take, len(lab))
+        idx.append(rs.choice(lab, size=take, replace=False))
+    return np.concatenate(idx)
+
+
+def _fit_predict(model, X_tr, y_tr, X_te, train_cap: int = 0):
+    take = _cap_idx(len(y_tr), y_tr, train_cap)
     scaler = StandardScaler()
-    X_tr_s = scaler.fit_transform(X_tr)
+    X_tr_s = scaler.fit_transform(X_tr[take])
     X_te_s = scaler.transform(X_te)
-    model.fit(X_tr_s, y_tr)
+    model.fit(X_tr_s, y_tr[take])
     return model.predict(X_te_s)
 
 
@@ -114,6 +129,10 @@ def _new_xgb():
         subsample=0.8, colsample_bytree=0.8, random_state=42,
         eval_metric='mlogloss',
     )
+
+
+def _new_linearsvc():
+    return LinearSVC(C=1.0, dual=False, max_iter=4000, class_weight='balanced', random_state=42)
 
 
 def _eval_if(X_tr, y_tr, X_te, y_te, normal_idx: int):
@@ -174,7 +193,8 @@ def _eval_ae(X_tr, y_tr, X_te, y_te, normal_idx: int):
 
 
 def run_loso(df: pd.DataFrame, feature_cols: list[str], feature_set: str,
-             with_unsupervised: bool) -> pd.DataFrame:
+             with_unsupervised: bool, with_linearsvc: bool = False,
+             linearsvc_only: bool = False, svm_train_cap: int = 40000) -> pd.DataFrame:
     le = LabelEncoder()
     y_all = le.fit_transform(df['label'])
     X_all = df[feature_cols].to_numpy(dtype=float)
@@ -188,6 +208,10 @@ def run_loso(df: pd.DataFrame, feature_cols: list[str], feature_set: str,
         models['XGBoost'] = _new_xgb
     except ImportError:
         print('[!] xgboost not installed — skip XGBoost')
+    if with_linearsvc:
+        models['LinearSVC'] = _new_linearsvc
+    if linearsvc_only:
+        models = {'LinearSVC': _new_linearsvc}
 
     logo = LeaveOneGroupOut()
     rows = []
@@ -200,7 +224,8 @@ def run_loso(df: pd.DataFrame, feature_cols: list[str], feature_set: str,
               f'| tuples={len(te)} | runs={n_runs}')
 
         for name, factory in models.items():
-            y_pred = _fit_predict(factory(), X_all[tr], y_all[tr], X_all[te])
+            cap = svm_train_cap if name == 'LinearSVC' else 0
+            y_pred = _fit_predict(factory(), X_all[tr], y_all[tr], X_all[te], train_cap=cap)
             y_te = y_all[te]
             held_id = class_to_id[held_label]
             held_mask = y_te == held_id
@@ -271,7 +296,7 @@ def run_loso(df: pd.DataFrame, feature_cols: list[str], feature_set: str,
 
 
 def summarize(fold_df: pd.DataFrame) -> pd.DataFrame:
-    sup = fold_df[fold_df['model'].isin(['RandomForest', 'XGBoost'])].copy()
+    sup = fold_df[fold_df['model'].isin(['RandomForest', 'XGBoost', 'LinearSVC'])].copy()
     if sup.empty:
         return pd.DataFrame()
     rows = []
@@ -335,7 +360,14 @@ def main() -> None:
     )
     ap.add_argument('--with-unsupervised', action='store_true',
                     help='IF/AE binary ablation (slow for AE)')
+    ap.add_argument('--with-linearsvc', action='store_true',
+                    help='Add LinearSVC (5th supervised baseline; dual=False)')
+    ap.add_argument('--linearsvc-only', action='store_true',
+                    help='Run only LinearSVC and merge into existing LOSO CSVs')
+    ap.add_argument('--svm-train-cap', type=int, default=40000)
     args = ap.parse_args()
+    if args.linearsvc_only and args.feature_set == 'primary':
+        args.feature_set = 'no_raw_ports'
     os.makedirs(REPORTS, exist_ok=True)
 
     print('=' * 64)
@@ -368,10 +400,19 @@ def main() -> None:
         if missing:
             raise SystemExit(f'Feature set {name} missing columns: {missing}')
         print(f'\n=== feature_set={name} | cols={cols} ===')
-        frames.append(run_loso(tuples, cols, name, args.with_unsupervised))
+        frames.append(run_loso(
+            tuples, cols, name, args.with_unsupervised,
+            with_linearsvc=args.with_linearsvc or args.linearsvc_only,
+            linearsvc_only=args.linearsvc_only,
+            svm_train_cap=args.svm_train_cap,
+        ))
 
     fold_df = pd.concat(frames, ignore_index=True)
     fold_path = os.path.join(REPORTS, 'scenario_held_out_per_scenario.csv')
+    if args.linearsvc_only and os.path.isfile(fold_path):
+        old = pd.read_csv(fold_path)
+        old = old[old['model'] != 'LinearSVC']
+        fold_df = pd.concat([old, fold_df], ignore_index=True)
     fold_df.to_csv(fold_path, index=False)
 
     summary = summarize(fold_df)

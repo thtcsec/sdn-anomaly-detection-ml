@@ -53,7 +53,7 @@ python dashboard/app.py            # http://127.0.0.1:5000
 sudo /usr/bin/python3 topology/custom_topo.py
 ```
 
-Poll 5 s. Three consecutive source-level alerts → OpenFlow DROP, hard_timeout 120 s. Demo uses the legacy XGBoost artifact in `models/`.
+Poll 5 s. Three consecutive source-level alerts → OpenFlow DROP, hard_timeout 120 s. SOC dropdown has five radios: XGBoost, Random Forest, LinearSVC, Isolation Forest, Autoencoder. Live LinearSVC (`models/svm_model.pkl`) is a demo baseline on the random-split 10-feature train.csv pipeline — not the 8-feature LOSO headline; do not cite its deploy accuracy as a thesis result. On this WSL lab RF and Isolation Forest load; XGBoost CUDA load fails; Autoencoder Keras load fails.
 
 ## Data
 

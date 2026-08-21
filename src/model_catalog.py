@@ -1,8 +1,8 @@
 """Realtime model artifacts — no fake fallbacks.
 
-XGBoost / Random Forest: 10-feature multiclass (ddos/normal/portscan).
-Isolation Forest / Autoencoder: binary Normal vs Anomaly. They cannot
-emit DDoS vs Portscan; do not invent those labels.
+XGBoost / Random Forest / SVM (LinearSVC): 10-feature multiclass
+(ddos/normal/portscan). Isolation Forest / Autoencoder: binary Normal vs
+Anomaly. They cannot emit DDoS vs Portscan; do not invent those labels.
 """
 
 from __future__ import annotations
@@ -12,11 +12,12 @@ import os
 ALLOWED_MODELS = (
     "xgboost",
     "random_forest",
+    "svm",
     "isolation_forest",
     "autoencoder",
 )
 
-MULTICLASS_MODELS = ("xgboost", "random_forest")
+MULTICLASS_MODELS = ("xgboost", "random_forest", "svm")
 BINARY_MODELS = ("isolation_forest", "autoencoder")
 
 FEATURE_COLS = [
@@ -44,6 +45,11 @@ def artifact_paths(models_dir: str, name: str) -> dict[str, str]:
         return {
             "model": os.path.join(models_dir, "random_forest_model.pkl"),
             "scaler": os.path.join(models_dir, "random_forest_scaler.pkl"),
+        }
+    if name == "svm":
+        return {
+            "model": os.path.join(models_dir, "svm_model.pkl"),
+            "scaler": os.path.join(models_dir, "svm_scaler.pkl"),
         }
     if name == "isolation_forest":
         return {
@@ -79,6 +85,7 @@ def train_hint(name: str) -> str:
     scripts = {
         "xgboost": "python src/train_xgboost.py",
         "random_forest": "python src/train_random_forest.py",
+        "svm": "python src/train_svm.py",
         "isolation_forest": "python src/train_isolation_forest.py",
         "autoencoder": "python src/train_autoencoder.py",
     }

@@ -415,3 +415,16 @@ git push -u origin feature/ml-training
 
 ---
 
+## Fault Protocol E (D1 / D2)
+
+Không đụng bộ anomaly 326k. Offline:
+
+```bash
+python src/eval_fault_loso.py --data dataset/fault_stats_grouped_e.csv --prefix fault_protocol_e
+```
+
+- **D1** (Normal vs Fault): đủ 5 mô hình — RF, XGBoost, SVM, Isolation Forest, Autoencoder. IF/AE train trên Normal của từng fold LOSO; scaler fit train-fold; ngưỡng AE = percentile 95 MSE trên Normal-train.
+- **D2** (4 lớp normal/bandwidth/loss/delay): chỉ RF / XGBoost / SVM. Isolation Forest và Autoencoder = **N/A** — unsupervised không gán được 4 nhãn (không bịa Acc 4-class).
+
+Số khóa: `reports/fault_protocol_e_d1_loso.csv`, `reports/fault_protocol_e_d1_per_class.csv`, `docs/FAULT_DATASET.md`.
+

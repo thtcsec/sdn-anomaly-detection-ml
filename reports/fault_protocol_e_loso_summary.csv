@@ -147,5 +147,5 @@ rule_based,EN_ping,39,1.0,1.0,
 rule_based,EN_tcp,38,1.0,1.0,
 rule_based,EN_udp,38,1.0,1.0,
 rule_based,_pooled,1534,0.4106910039113429,0.3855704598383613,
-isolation_forest,_pooled,0,,,N/A — unsupervised binary only
-autoencoder,_pooled,0,,,N/A — unsupervised binary only
+isolation_forest,_pooled,0,,,N/A — unsupervised answers D1 only; cannot assign 4-class labels
+autoencoder,_pooled,0,,,N/A — unsupervised answers D1 only; cannot assign 4-class labels

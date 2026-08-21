@@ -57,14 +57,26 @@ OVS PortStats `rx/tx_dropped` trên lab này **vẫn 0** khi netem drop (qdisc, 
 
 ### LOSO Protocol E (đủ 36 scenario — số khóa 2026-08-21)
 
-Pooled n_test = 1534. Nguồn: `reports/fault_protocol_e_d1_loso.csv`, `fault_protocol_e_d2_loso.csv`, `fault_protocol_e_d2_per_class.csv`.
+Pooled n_test = 1534. Nguồn: `reports/fault_protocol_e_d1_loso.csv`, `fault_protocol_e_d1_per_class.csv`, `fault_protocol_e_d2_loso.csv`, `fault_protocol_e_d2_per_class.csv`.
 
-| Bài | RF Acc / F1-macro | XGB | SVM (RBF) | Rule Acc |
-|-----|-------------------|-----|-----------|----------|
-| D1 | **0,981 / 0,965** | 0,976 / 0,955 | 0,968 / 0,941 | 0,495 |
-| D2 | **0,923 / 0,926** | 0,902 / 0,903 | 0,886 / 0,889 | 0,411 |
+D1 — năm mô hình (Normal vs Fault). IF/AE train **Normal-only** từng fold LOSO; scaler fit trên subset đó; ngưỡng AE = percentile 95 MSE train-normal (cùng protocol anomaly LOSO). Keras 3 / TF 2.21 CPU.
 
-RF D2 recall: Bandwidth 0,883 · Loss 0,874 · Delay 0,996 · Normal 0,941. **Headline = RF.** SVM không thay RF. IF/AE = N/A.
+| Model | Acc | F1-macro | Recall Normal | Recall Fault |
+|-------|-----|----------|---------------|--------------|
+| Random Forest | **0,9811** | **0,9652** | 0,9213 | 0,9930 |
+| XGBoost | 0,9759 | 0,9554 | 0,9016 | 0,9906 |
+| SVM (RBF) | 0,9681 | 0,9414 | 0,8858 | 0,9844 |
+| Autoencoder | 0,5456 | 0,4899 | 0,6496 | 0,5250 |
+| Isolation Forest | 0,1382 | 0,1314 | 0,6850 | 0,0297 |
+| Rule-based | 0,4954 | 0,4814 | 1,0000 | 0,3953 |
+
+D2 — 4 lớp. IF/AE **phải** để trống: mô hình không giám sát không gán 4 nhãn (cần head có giám sát riêng). Không bịa Acc 4-class.
+
+| Bài | RF Acc / F1-macro | XGB | SVM (RBF) | Rule Acc | IF / AE |
+|-----|-------------------|-----|-----------|----------|---------|
+| D2 | **0,923 / 0,926** | 0,902 / 0,903 | 0,886 / 0,889 | 0,411 | **N/A** |
+
+RF D2 recall: Bandwidth 0,883 · Loss 0,874 · Delay 0,996 · Normal 0,941. **Headline = RF.** SVM không thay RF. Unsupervised chỉ trả lời D1.
 
 D2 **được phép** trên Protocol E lab; **không** được phép suy ra mạng trường / production. 112 `run_id` (36 scenario; gồm run smoke gộp thêm, không phải đúng 36×3=108).
 
@@ -92,7 +104,7 @@ Protocol D (chỉ replay lịch sử): `--protocol d` → `merge_fault_runs.py -
 
 SVM là baseline có giám sát cổ điển, **không** thay RF/XGB và **không** tự chữa D2 nếu feature còn chồng.
 
-- Fault D1/D2: `SVC(kernel="rbf")`, `StandardScaler` fit trên fold train. IF/AE = N/A trên 4-class.
+- Fault D1: `SVC(kernel="rbf")`, `StandardScaler` fit trên fold train. IF/AE cùng protocol (Normal-only, scaler train-fold). IF/AE **N/A trên D2 4-class** — unsupervised chỉ trả lời D1.
 - Anomaly LOSO binary: `LinearSVC(dual=False, max_iter=4000)`, cap train 40k; không RBF trên 326k.
 
 ## File
@@ -108,6 +120,6 @@ SVM là baseline có giám sát cổ điển, **không** thay RF/XGB và **khôn
 
 ## Word
 
-> Hai tập không trộn. Hai câu hỏi: D1 = phát hiện fault vs normal; D2 = 4 lớp. Headline hiện tại là **Protocol E** (`fault_stats_grouped_e.csv`, 1.982 snapshot, 112 run, 36 scenario): D1 RF Acc 0,981 / F1-macro 0,965; D2 RF Acc 0,923 / F1-macro 0,926; recall Bandwidth/Loss/Delay 0,883 / 0,874 / 0,996. SVM D2 0,886 / 0,889 — kém RF, không chiếu. D2 E chỉ nhận xét lab Mininet 2s6h, **không** campus SDN. Protocol D (6666 snapshot) là thí nghiệm inject hỏng: D2 Acc ~0,37–0,38 — phụ lục, không phải số hiện tại. IF/AE không chạy 4-class.
+> Hai tập không trộn. Hai câu hỏi: D1 = phát hiện fault vs normal; D2 = 4 lớp. Headline hiện tại là **Protocol E** (`fault_stats_grouped_e.csv`, 1.982 snapshot, 112 run, 36 scenario): D1 RF Acc 0,9811 / F1-macro 0,9652; AE 0,5456 / 0,4899; IF 0,1382 / 0,1314. D2 RF Acc 0,923 / F1-macro 0,926; recall Bandwidth/Loss/Delay 0,883 / 0,874 / 0,996. SVM D2 0,886 / 0,889 — kém RF, không chiếu. D2 E chỉ nhận xét lab Mininet 2s6h, **không** campus SDN. Protocol D (6666 snapshot) là thí nghiệm inject hỏng: D2 Acc ~0,37–0,38 — phụ lục, không phải số hiện tại. IF/AE chạy D1; **không** chạy 4-class D2 (N/A).
 
 [15] S. M. Srinivasan, T. Truong-Huu, and M. Gurusamy, “Machine learning-based link fault identification and localization in complex networks,” IEEE Internet of Things Journal, vol. 6, no. 4, pp. 6556–6566, 2019.

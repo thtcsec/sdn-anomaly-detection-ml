@@ -1,10 +1,11 @@
 """
 Real-time detection controller (os-ken) with optional Auto-Mitigation DROP.
 
-Four artifacts, two tasks — do not mix:
-  xgboost / random_forest → 3-class DDOS | NORMAL | PORTSCAN
+Five artifacts, two tasks — do not mix:
+  xgboost / random_forest / svm → 3-class DDOS | NORMAL | PORTSCAN
   isolation_forest / autoencoder → NORMAL | ANOMALY only
 Isolation Forest and Autoencoder cannot name DDoS vs Portscan.
+SVM is LinearSVC (sklearn); do not import tensorflow on the OpenFlow thread.
 
 Chạy: python controller/run_realtime.py
 """
@@ -76,6 +77,7 @@ DEFAULT_CONFIG = {
 LOAD_TIMEOUT_SEC = {
     'xgboost': 30,
     'random_forest': 60,
+    'svm': 30,
     'isolation_forest': 45,
     'autoencoder': 180,
 }
@@ -170,7 +172,7 @@ class RealtimeDetector(app_manager.OSKenApp):
             self._begin_model_load(target_model)
 
     def _log_artifact_inventory(self):
-        """RAM chỉ giữ 1 model. Bốn file vẫn nằm trong models/; đổi ở Cấu hình SOC."""
+        """RAM chỉ giữ 1 model. Năm file vẫn nằm trong models/; đổi ở Cấu hình SOC."""
         try:
             import sklearn
             sk_ver = sklearn.__version__
@@ -184,7 +186,7 @@ class RealtimeDetector(app_manager.OSKenApp):
         inv = inventory(MODELS_DIR)
         self.logger.info(
             "Active model = %s. Other algorithms load when selected in Settings, "
-            "not all four at process start.",
+            "not all five at process start.",
             self.selected_model_name or (self._load_target + ' (loading)') or 'none',
         )
         for name in ALLOWED_MODELS:
@@ -200,7 +202,7 @@ class RealtimeDetector(app_manager.OSKenApp):
         n_in = getattr(scaler, "n_features_in_", None)
         if n_in is not None and int(n_in) != n_feat:
             raise ValueError(f"{model_name} scaler n_features_in_={n_in}, expected {n_feat}")
-        if model_name in ("xgboost", "random_forest"):
+        if model_name in ("xgboost", "random_forest", "svm"):
             classes = getattr(model, "classes_", None)
             if classes is not None and set(int(c) for c in classes) != {0, 1, 2}:
                 raise ValueError(f"{model_name} classes_={list(classes)}, expected [0,1,2]")
@@ -450,7 +452,7 @@ class RealtimeDetector(app_manager.OSKenApp):
     def _predict_label(self, features_scaled_df):
         name = self.selected_model_name
         X = np.asarray(features_scaled_df, dtype=np.float64)
-        if name in ("xgboost", "random_forest"):
+        if name in ("xgboost", "random_forest", "svm"):
             pred = int(self.model.predict(features_scaled_df)[0])
             return LABEL_MAP.get(pred, "UNKNOWN")
         if name == "isolation_forest":

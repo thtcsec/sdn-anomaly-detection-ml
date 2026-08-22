@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token }}">
     <title>SDN Cyber SOC - Real-time Anomaly Detection & Mitigation</title>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -456,11 +457,20 @@
                     <label class="text-xs font-semibold text-slate-300 block mb-2">Mô hình phát hiện (artifact trong models/):</label>
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <label class="model-card glass-card rounded-xl p-3 border border-cyber-border cursor-pointer flex items-start gap-2.5 hover:border-cyan-500/50 transition-colors">
-                            <input type="radio" name="model-radio" value="xgboost" checked class="mt-1 accent-cyan-400">
+                            <input type="radio" name="model-radio" value="random_forest_binary" checked class="mt-1 accent-cyan-400">
+                            <div>
+                                <div class="text-xs font-bold text-white">Random Forest (live / thesis)</div>
+                                <div class="text-[10px] text-slate-300">Nhị phân 8 feature: NORMAL / ANOMALY (không raw port)</div>
+                                <div class="text-[10px] text-slate-400 font-mono">random_forest_binary_realtime.pkl · p50 ~12.99 ms (scaler+predict)</div>
+                            </div>
+                        </label>
+
+                        <label class="model-card glass-card rounded-xl p-3 border border-cyber-border cursor-pointer flex items-start gap-2.5 hover:border-cyan-500/50 transition-colors">
+                            <input type="radio" name="model-radio" value="xgboost" class="mt-1 accent-cyan-400">
                             <div>
                                 <div class="text-xs font-bold text-white">XGBoost</div>
-                                <div class="text-[10px] text-slate-300">3 lớp: DDoS / Normal / Portscan</div>
-                                <div class="text-[10px] text-slate-400 font-mono">xgboost_model.pkl · ~0.33 ms/flow (benchmark)</div>
+                                <div class="text-[10px] text-slate-300">Legacy 3 lớp: DDoS / Normal / Portscan (10 feature)</div>
+                                <div class="text-[10px] text-slate-400 font-mono">xgboost_model.pkl · xgboost-cpu 3.2.0 trên WSL</div>
                             </div>
                         </label>
 
@@ -572,12 +582,15 @@
         }
 
         // SIMULATION API CALL
+        const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+        const postHeaders = { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken };
+
         async function triggerSimulate(type, duration = 8) {
             try {
                 showToast(`Đang gửi lệnh test [${type.toUpperCase()}] tới Mininet...`, 'warning');
                 const res = await fetch('/api/simulate', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: postHeaders,
                     body: JSON.stringify({ type: type, duration: duration, target: '10.0.0.1' })
                 });
                 const data = await res.json();
@@ -595,7 +608,7 @@
         async function triggerReset() {
             if (!confirm('Bạn có chắc chắn muốn reset toàn bộ số liệu thống kê và danh sách IP bị chặn?')) return;
             try {
-                const res = await fetch('/api/reset', { method: 'POST' });
+                const res = await fetch('/api/reset', { method: 'POST', headers: postHeaders });
                 const data = await res.json();
                 showToast(data.message, 'success');
                 fetchLiveData();
@@ -616,7 +629,7 @@
             try {
                 const res = await fetch('/api/settings', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: postHeaders,
                     body: JSON.stringify({
                         polling_interval: polling,
                         alert_threshold: threshold,
@@ -871,7 +884,7 @@
 
                 const loadStatusEarly = data.stats.model_load_status || 'idle';
                 const runtime = (data.stats.runtime_model
-                    || (loadStatusEarly === 'loading' ? 'loading' : ((data.config && data.config.selected_model) || 'xgboost')));
+                    || (loadStatusEarly === 'loading' ? 'loading' : ((data.config && data.config.selected_model) || 'random_forest_binary')));
                 const task = data.stats.model_task || '';
                 document.getElementById('active-model-badge').textContent = String(runtime).toUpperCase();
                 document.getElementById('stat-model-name').textContent = String(runtime).toUpperCase();
@@ -950,7 +963,7 @@
                         
                         const radios = document.querySelectorAll('input[name="model-radio"]');
                         radios.forEach(r => {
-                            r.checked = (r.value === (cfg.selected_model || 'xgboost'));
+                            r.checked = (r.value === (cfg.selected_model || 'random_forest_binary'));
                         });
                         initializedSettings = true;
                     }

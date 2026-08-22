@@ -1,0 +1,70 @@
+{
+  "artifact_name": "random_forest_binary",
+  "task": "binary_anomaly_port_agnostic",
+  "labels": {
+    "0": "NORMAL",
+    "1": "ANOMALY"
+  },
+  "feature_columns": [
+    "ip_proto",
+    "packet_count",
+    "byte_count",
+    "duration_sec",
+    "packet_count_per_sec",
+    "byte_count_per_sec",
+    "packet_size_avg",
+    "flow_duration"
+  ],
+  "n_features": 8,
+  "training_protocol": "all clean independent runs after frozen LOSO model selection; first 3 tuple polls; no raw ports; no SMOTE",
+  "evaluation_reports": [
+    "reports/binary_realtime_loso_summary.csv",
+    "reports/binary_realtime_loso_per_scenario.csv"
+  ],
+  "dataset": "dataset/flow_stats_grouped.csv",
+  "dataset_sha256": "3b1c2c3ed80624dfd0ce6d264028c3642279f5493a828c15323bcd5e5348b12e",
+  "n_training_snapshots": 211004,
+  "n_runs": 206,
+  "n_scenarios": 21,
+  "class_counts": {
+    "normal": 103652,
+    "attack": 107352
+  },
+  "training_hyperparameters": {
+    "bootstrap": true,
+    "ccp_alpha": 0.0,
+    "class_weight": "balanced_subsample",
+    "criterion": "gini",
+    "max_depth": 12,
+    "max_features": "sqrt",
+    "max_leaf_nodes": null,
+    "max_samples": null,
+    "min_impurity_decrease": 0.0,
+    "min_samples_leaf": 2,
+    "min_samples_split": 2,
+    "min_weight_fraction_leaf": 0.0,
+    "monotonic_cst": null,
+    "n_estimators": 200,
+    "n_jobs": -1,
+    "oob_score": false,
+    "random_state": 42,
+    "verbose": 0,
+    "warm_start": false
+  },
+  "inference_n_jobs": 1,
+  "train_seconds": 9.5987697999999,
+  "batch1_latency_ms": {
+    "n": 1000,
+    "p50": 12.9898,
+    "p95": 17.592079999999996,
+    "p99": 22.480514999999983,
+    "scope": "scaler.transform + model.predict; excludes FlowStats polling and feature extraction"
+  },
+  "runtime": {
+    "python": "3.11.9",
+    "scikit_learn": "1.7.2",
+    "pandas": "2.3.1",
+    "numpy": "2.2.6"
+  },
+  "created_at_utc": "2026-08-22T04:53:14.327243+00:00"
+}

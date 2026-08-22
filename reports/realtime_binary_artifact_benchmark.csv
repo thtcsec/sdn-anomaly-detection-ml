@@ -1,0 +1,2 @@
+artifact,n_training_snapshots,train_seconds,latency_batch1_p50_ms,latency_batch1_p95_ms,latency_batch1_p99_ms,accuracy_note
+random_forest_binary,211004,9.5987697999999,12.9898,17.592079999999996,22.480514999999983,Not reported on fit data; use binary_realtime_loso_summary.csv

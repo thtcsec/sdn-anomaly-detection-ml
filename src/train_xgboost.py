@@ -18,6 +18,9 @@ import os
 import sys
 import time
 
+# WSL has no GPU. Must hide CUDA before importing libxgboost.
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")
+
 import joblib
 import matplotlib.pyplot as plt
 import numpy as np
@@ -102,6 +105,7 @@ def main():
         random_state=42,
         eval_metric='mlogloss',
         early_stopping_rounds=20,
+        device='cpu',
     )
 
     t0 = time.perf_counter()
@@ -232,7 +236,11 @@ def main():
     )
     print("[✓] Saved: reports/xgboost_classification_report.csv")
 
-    # 9. Save model + scaler
+    # 9. Save model + scaler (CPU booster so WSL/SOC can unpickle without CUDA)
+    try:
+        model.get_booster().set_param({"device": "cpu"})
+    except Exception:
+        pass
     joblib.dump(model, os.path.join(MODELS_DIR, 'xgboost_model.pkl'))
     joblib.dump(scaler, os.path.join(MODELS_DIR, 'scaler.pkl'))
     print("[✓] Saved: models/xgboost_model.pkl")

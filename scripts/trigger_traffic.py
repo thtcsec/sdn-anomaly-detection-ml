@@ -8,6 +8,9 @@ import os
 import subprocess
 import time
 import argparse
+import ipaddress
+
+ALLOWED_TARGETS = {ipaddress.ip_address(f"10.0.0.{host}") for host in range(1, 7)}
 
 def get_mininet_host_pids():
     """Lấy PID của các mininet host processes từ ps."""
@@ -25,14 +28,28 @@ def get_mininet_host_pids():
         print(f"[!] Error getting host pids: {e}", file=sys.stderr)
     return pids
 
-def run_in_host(pid, cmd, bg=True):
+def validate_target(value):
+    """Accept only the six hosts in the fixed Mininet thesis topology."""
+    try:
+        parsed = ipaddress.ip_address(str(value))
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("target must be an IPv4 address") from exc
+    if parsed not in ALLOWED_TARGETS:
+        raise argparse.ArgumentTypeError("target must be one of 10.0.0.1 through 10.0.0.6")
+    return str(parsed)
+
+
+def run_in_host(pid, argv, bg=True):
     """Chạy command bên trong host namespace qua mnexec."""
     if not pid:
         return False
-    full_cmd = f"mnexec -a {pid} {cmd}"
+    if not isinstance(argv, (list, tuple)) or not argv:
+        raise ValueError("argv must be a non-empty list")
+    full_cmd = ["mnexec", "-a", str(int(pid)), *[str(arg) for arg in argv]]
     if bg:
-        full_cmd += " &"
-    subprocess.Popen(full_cmd, shell=True)
+        subprocess.Popen(full_cmd, start_new_session=True)
+    else:
+        subprocess.run(full_cmd, check=False)
     return True
 
 def trigger_normal(duration=10):
@@ -46,12 +63,12 @@ def trigger_normal(duration=10):
 
     print(f"[*] Bắt đầu sinh Normal Traffic ({duration}s)...")
     if h2_pid:
-        run_in_host(h2_pid, f"timeout {duration + 3} iperf -s -p 5001", bg=True)
+        run_in_host(h2_pid, ["timeout", str(duration + 3), "iperf", "-s", "-p", "5001"], bg=True)
 
     time.sleep(0.5)
     if h1_pid:
-        run_in_host(h1_pid, f"ping -c {max(4, duration)} -i 0.4 10.0.0.2", bg=True)
-        run_in_host(h1_pid, f"iperf -c 10.0.0.2 -p 5001 -t {duration}", bg=True)
+        run_in_host(h1_pid, ["ping", "-c", str(max(4, duration)), "-i", "0.4", "10.0.0.2"], bg=True)
+        run_in_host(h1_pid, ["iperf", "-c", "10.0.0.2", "-p", "5001", "-t", str(duration)], bg=True)
     
     return True
 
@@ -67,10 +84,10 @@ def trigger_ddos(target_ip='10.0.0.1', duration=8):
     print(f"[*] Bắt đầu sinh DDoS SYN/UDP Flood tới {target_ip} ({duration}s)...")
     if h4_pid:
         # SYN flood
-        run_in_host(h4_pid, f"timeout {duration} hping3 -S --flood -V -p 80 {target_ip}", bg=True)
+        run_in_host(h4_pid, ["timeout", str(duration), "hping3", "-S", "--flood", "-V", "-p", "80", target_ip], bg=True)
     if h5_pid:
         # UDP flood
-        run_in_host(h5_pid, f"timeout {duration} hping3 --udp --flood -p 53 {target_ip}", bg=True)
+        run_in_host(h5_pid, ["timeout", str(duration), "hping3", "--udp", "--flood", "-p", "53", target_ip], bg=True)
     
     return True
 
@@ -83,7 +100,7 @@ def trigger_portscan(target_ip='10.0.0.1', duration=10):
     h6_pid = pids.get('h6')
     print(f"[*] Bắt đầu sinh Portscan tới {target_ip} ({duration}s)...")
     if h6_pid:
-        run_in_host(h6_pid, f"timeout {duration} nmap -sS -T4 -p 1-1000 {target_ip}", bg=True)
+        run_in_host(h6_pid, ["timeout", str(duration), "nmap", "-sS", "-T4", "-p", "1-1000", target_ip], bg=True)
     
     return True
 
@@ -116,8 +133,8 @@ def stop_all_traffic():
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Mininet Traffic Generator")
     parser.add_argument('--type', choices=['normal', 'ddos', 'portscan', 'stop'], default='normal')
-    parser.add_argument('--duration', type=int, default=8)
-    parser.add_argument('--target', type=str, default='10.0.0.1')
+    parser.add_argument('--duration', type=lambda value: max(1, min(60, int(value))), default=8)
+    parser.add_argument('--target', type=validate_target, default='10.0.0.1')
     args = parser.parse_args()
 
     if args.type == 'normal':

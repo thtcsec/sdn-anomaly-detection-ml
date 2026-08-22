@@ -1,7 +1,8 @@
 """
 Real-time detection controller (os-ken) with optional Auto-Mitigation DROP.
 
-Five artifacts, two tasks — do not mix:
+Six artifacts, explicit tasks — do not mix:
+  random_forest_binary → binary NORMAL | ANOMALY, 8 port-agnostic features
   xgboost / random_forest / svm → 3-class DDOS | NORMAL | PORTSCAN
   isolation_forest / autoencoder → NORMAL | ANOMALY only
 Isolation Forest and Autoencoder cannot name DDoS vs Portscan.
@@ -17,6 +18,9 @@ import time
 import warnings
 from collections import defaultdict
 from datetime import datetime
+
+# WSL/SOC has no NVIDIA GPU. Set before joblib unpickle imports libxgboost.
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")
 
 import joblib
 import numpy as np
@@ -42,10 +46,14 @@ from model_catalog import (  # noqa: E402
     BINARY_MODELS,
     FEATURE_COLS,
     artifact_paths,
+    feature_columns,
+    force_xgboost_cpu,
     inventory,
     missing_artifacts,
+    model_task,
     train_hint,
 )
+from mitigation_policy import update_consecutive_poll_streaks  # noqa: E402
 
 from os_ken.base import app_manager
 from os_ken.controller import ofp_event
@@ -61,7 +69,8 @@ CONFIG_PATH = os.path.join(BASE_DIR, 'dataset', 'controller_config.json')
 
 MAX_ALERTS = 500
 MAX_RECENT_FLOWS = 50
-BLOCK_PRIORITY = 100
+BLOCK_PRIORITY = 1000
+BLOCK_COOKIE = 0x53444E424C4F434B  # ASCII-ish "SDNBLOCK"
 LABEL_MAP = {0: 'DDOS', 1: 'NORMAL', 2: 'PORTSCAN'}
 ALERT_LABELS = frozenset({'DDOS', 'PORTSCAN', 'ANOMALY'})
 
@@ -70,11 +79,12 @@ DEFAULT_CONFIG = {
     'alert_threshold': 3,
     'block_timeout': 120,
     'mitigation_enabled': True,
-    'selected_model': 'xgboost'
+    'selected_model': 'random_forest_binary'
 }
 
 # First TensorFlow import on WSL/CPU is 30–90s of silence without these.
 LOAD_TIMEOUT_SEC = {
+    'random_forest_binary': 60,
     'xgboost': 30,
     'random_forest': 60,
     'svm': 30,
@@ -98,10 +108,13 @@ class RealtimeDetector(app_manager.OSKenApp):
         self.alert_threshold = 3
         self.block_timeout = 120
         self.mitigation_enabled = True
-        self.selected_model_name = 'xgboost'
+        self.selected_model_name = 'random_forest_binary'
 
-        self.alert_counter = defaultdict(int)  # IP → số lần bị detect
+        self.alert_counter = defaultdict(int)  # IP → số poll liên tiếp bất thường
         self.blocked_ips = set()               # Danh sách IP đã bị block
+        self._blocked_switches_by_ip = defaultdict(set)
+        self._poll_generation = 0
+        self._poll_observations = None
         self.flows_analyzed = 0
         self.normal_count = 0
         self.ddos_count = 0
@@ -112,6 +125,7 @@ class RealtimeDetector(app_manager.OSKenApp):
         self.ae_threshold = None
         self.model_task = 'multiclass'
         self.model_artifact = ''
+        self.active_feature_cols = list(FEATURE_COLS)
         self._prev_packets = {}
         self._result_lock = _threading.Lock()
         self._load_result = None
@@ -165,7 +179,7 @@ class RealtimeDetector(app_manager.OSKenApp):
         self.block_timeout = max(10, min(1200, int(cfg.get('block_timeout', 120))))
         self.mitigation_enabled = bool(cfg.get('mitigation_enabled', True))
 
-        target_model = str(cfg.get('selected_model', 'xgboost')).lower()
+        target_model = str(cfg.get('selected_model', 'random_forest_binary')).lower()
         if target_model not in ALLOWED_MODELS:
             self.logger.warning("[!] Config selected_model=%s not allowed — ignored", target_model)
         elif initial or target_model != self.selected_model_name or self.model is None:
@@ -198,7 +212,7 @@ class RealtimeDetector(app_manager.OSKenApp):
             self.logger.info("  artifact %-18s %s  (%s)", name, mark, role)
 
     def _validate_loaded(self, model_name, model, scaler, ae_threshold):
-        n_feat = len(FEATURE_COLS)
+        n_feat = len(feature_columns(model_name))
         n_in = getattr(scaler, "n_features_in_", None)
         if n_in is not None and int(n_in) != n_feat:
             raise ValueError(f"{model_name} scaler n_features_in_={n_in}, expected {n_feat}")
@@ -206,6 +220,12 @@ class RealtimeDetector(app_manager.OSKenApp):
             classes = getattr(model, "classes_", None)
             if classes is not None and set(int(c) for c in classes) != {0, 1, 2}:
                 raise ValueError(f"{model_name} classes_={list(classes)}, expected [0,1,2]")
+        if model_name == "random_forest_binary":
+            classes = getattr(model, "classes_", None)
+            if classes is not None and set(int(c) for c in classes) != {0, 1}:
+                raise ValueError(
+                    f"random_forest_binary classes_={list(classes)}, expected [0,1]"
+                )
         if model_name == "isolation_forest":
             n_m = getattr(model, "n_features_in_", None)
             if n_m is not None and int(n_m) != n_feat:
@@ -293,6 +313,16 @@ class RealtimeDetector(app_manager.OSKenApp):
         except Exception:
             pass
         paths = artifact_paths(MODELS_DIR, model_name)
+        manifest_path = paths.get("manifest")
+        if manifest_path:
+            with open(manifest_path, "r", encoding="utf-8") as handle:
+                manifest = json.load(handle)
+            if manifest.get("feature_columns") != feature_columns(model_name):
+                raise ValueError(
+                    f"{model_name} manifest feature schema does not match catalog"
+                )
+            if manifest.get("task") != model_task(model_name):
+                raise ValueError(f"{model_name} manifest task does not match catalog")
         print(f"[*] [{model_name}] 1/3 load scaler {os.path.basename(paths['scaler'])}", flush=True)
         scaler = joblib.load(paths["scaler"])
         ae_threshold = None
@@ -331,6 +361,8 @@ class RealtimeDetector(app_manager.OSKenApp):
                 flush=True,
             )
             model = joblib.load(paths["model"])
+            if model_name == "xgboost":
+                force_xgboost_cpu(model)
         print(f"[*] [{model_name}] 3/3 validate artifact", flush=True)
         self._validate_loaded(model_name, model, scaler, ae_threshold)
         return model, scaler, ae_threshold, os.path.basename(paths["model"])
@@ -418,7 +450,8 @@ class RealtimeDetector(app_manager.OSKenApp):
         self.scaler = scaler
         self.ae_threshold = ae_threshold
         self.selected_model_name = model_name
-        self.model_task = "binary_anomaly" if model_name in BINARY_MODELS else "multiclass"
+        self.model_task = model_task(model_name)
+        self.active_feature_cols = feature_columns(model_name)
         self.model_artifact = artifact
         self.normal_count = 0
         self.ddos_count = 0
@@ -455,6 +488,9 @@ class RealtimeDetector(app_manager.OSKenApp):
         if name in ("xgboost", "random_forest", "svm"):
             pred = int(self.model.predict(features_scaled_df)[0])
             return LABEL_MAP.get(pred, "UNKNOWN")
+        if name == "random_forest_binary":
+            pred = int(self.model.predict(features_scaled_df)[0])
+            return "ANOMALY" if pred == 1 else "NORMAL" if pred == 0 else "UNKNOWN"
         if name == "isolation_forest":
             raw = int(self.model.predict(X)[0])
             if raw == -1:
@@ -488,6 +524,15 @@ class RealtimeDetector(app_manager.OSKenApp):
                     f"Đang nạp {self._load_target} {elapsed:.0f}/{self._load_timeout_sec}s"
                 )
             self._reload_config()
+            self._finalize_poll_observations(force=True)
+            self._poll_generation += 1
+            self._poll_observations = {
+                'generation': self._poll_generation,
+                'seen_dpids': set(),
+                'observed_ips': set(),
+                'anomalous_ips': set(),
+                'labels_by_ip': defaultdict(set),
+            }
             for dp_id, dp in self.datapaths.items():
                 self._request_stats(dp)
             self._save_live_stats()
@@ -627,17 +672,28 @@ class RealtimeDetector(app_manager.OSKenApp):
             byte_per_sec = stat.byte_count / duration if duration > 0 else 0
             pkt_size_avg = stat.byte_count / stat.packet_count if stat.packet_count > 0 else 0
 
-            # DataFrame với đúng tên cột lúc fit scaler → tránh warning feature names
-            features = pd.DataFrame([[
-                ip_proto, tp_src, tp_dst,
-                stat.packet_count, stat.byte_count, stat.duration_sec,
-                pkt_per_sec, byte_per_sec, pkt_size_avg, duration
-            ]], columns=FEATURE_COLS)
+            # Build once, then select the exact ordered schema declared by the artifact.
+            feature_values = {
+                'ip_proto': ip_proto,
+                'tp_src': tp_src,
+                'tp_dst': tp_dst,
+                'packet_count': stat.packet_count,
+                'byte_count': stat.byte_count,
+                'duration_sec': stat.duration_sec,
+                'packet_count_per_sec': pkt_per_sec,
+                'byte_count_per_sec': byte_per_sec,
+                'packet_size_avg': pkt_size_avg,
+                'flow_duration': duration,
+            }
+            features = pd.DataFrame(
+                [[feature_values[col] for col in self.active_feature_cols]],
+                columns=self.active_feature_cols,
+            )
 
             t0 = time.perf_counter()
             features_scaled = pd.DataFrame(
                 self.scaler.transform(features),
-                columns=FEATURE_COLS,
+                columns=self.active_feature_cols,
             )
             label = self._predict_label(features_scaled)
             inf_time = (time.perf_counter() - t0) * 1000.0  # in ms
@@ -660,6 +716,7 @@ class RealtimeDetector(app_manager.OSKenApp):
             ip_src = stat.match['ipv4_src']
             ip_dst = stat.match['ipv4_dst']
             is_blocked = (ip_src in self.blocked_ips)
+            self._record_poll_observation(ip_src, label)
 
             flow_key = (
                 int(datapath.id),
@@ -711,15 +768,6 @@ class RealtimeDetector(app_manager.OSKenApp):
                     alert_line, self.last_inference_latency_ms
                 )
 
-                blocked_now = False
-                # === AUTO-MITIGATION ===
-                if self.mitigation_enabled and ip_src not in self.blocked_ips:
-                    self.alert_counter[ip_src] += 1
-
-                    if self.alert_counter[ip_src] >= self.alert_threshold:
-                        self._block_attacker(datapath, ip_src, label)
-                        blocked_now = True
-
                 self._append_alert({
                     'timestamp': timestamp,
                     'ip_src': ip_src,
@@ -729,10 +777,16 @@ class RealtimeDetector(app_manager.OSKenApp):
                     'packet_count_per_sec': float(pkt_per_sec),
                     'byte_count_per_sec': float(byte_per_sec),
                     'prediction': label,
-                    'blocked': blocked_now or is_blocked,
+                    'blocked': is_blocked,
                     'flows_analyzed': self.flows_analyzed,
                     'latency_ms': self.last_inference_latency_ms
                 })
+
+        if self._poll_observations is not None:
+            self._poll_observations['seen_dpids'].add(int(datapath.id))
+            expected = set(int(dpid) for dpid in self.datapaths)
+            if expected and self._poll_observations['seen_dpids'] >= expected:
+                self._finalize_poll_observations()
 
         if updated_any:
             self._save_live_stats()
@@ -744,6 +798,46 @@ class RealtimeDetector(app_manager.OSKenApp):
                 f"blocked={sorted(self.blocked_ips) or '-'}",
                 flush=True,
             )
+
+    def _record_poll_observation(self, ip_src, label):
+        """Aggregate many flow predictions into one source-IP decision per poll."""
+        if self._poll_observations is None:
+            self._poll_generation += 1
+            self._poll_observations = {
+                'generation': self._poll_generation,
+                'seen_dpids': set(),
+                'observed_ips': set(),
+                'anomalous_ips': set(),
+                'labels_by_ip': defaultdict(set),
+            }
+        ip_src = str(ip_src)
+        self._poll_observations['observed_ips'].add(ip_src)
+        self._poll_observations['labels_by_ip'][ip_src].add(str(label))
+        if label in ALERT_LABELS:
+            self._poll_observations['anomalous_ips'].add(ip_src)
+
+    def _finalize_poll_observations(self, force=False):
+        """Update consecutive-poll streaks exactly once per IP and poll cycle."""
+        obs = self._poll_observations
+        if not obs:
+            return
+        expected = set(int(dpid) for dpid in self.datapaths)
+        if not force and expected and obs['seen_dpids'] < expected:
+            return
+
+        incremented = update_consecutive_poll_streaks(
+            self.alert_counter,
+            obs['anomalous_ips'],
+            obs['observed_ips'],
+            self.blocked_ips,
+        )
+        for ip_src in incremented:
+            if self.mitigation_enabled and self.alert_counter[ip_src] >= self.alert_threshold:
+                labels = sorted(obs['labels_by_ip'].get(ip_src) or {'ANOMALY'})
+                datapath = next(iter(self.datapaths.values()), None)
+                if datapath is not None:
+                    self._block_attacker(datapath, ip_src, '/'.join(labels))
+        self._poll_observations = None
 
     def _save_live_stats(self):
         """Lưu telemetry & live stats ra dataset/live_stats.json cho Dashboard."""
@@ -814,18 +908,7 @@ class RealtimeDetector(app_manager.OSKenApp):
             return
 
         self.blocked_ips.add(attacker_ip)
-        parser = datapath.ofproto_parser
-        ofproto = datapath.ofproto
-
-        # Match tất cả traffic từ attacker IP
-        match = parser.OFPMatch(
-            eth_type=ether_types.ETH_TYPE_IP,
-            ipv4_src=attacker_ip
-        )
-
-        # Actions rỗng = DROP (không forward gói tin đi đâu cả)
-        actions = []
-        inst = [parser.OFPInstructionActions(ofproto.OFPIT_APPLY_ACTIONS, actions)]
+        self._blocked_switches_by_ip[attacker_ip] = set()
 
         # Cài đặt DROP rule trên TẤT CẢ switches đã kết nối
         for dp_id, dp in self.datapaths.items():
@@ -841,6 +924,7 @@ class RealtimeDetector(app_manager.OSKenApp):
 
             mod = dp_parser.OFPFlowMod(
                 datapath=dp,
+                cookie=BLOCK_COOKIE,
                 priority=BLOCK_PRIORITY,
                 match=dp_match,
                 instructions=dp_inst,
@@ -849,6 +933,8 @@ class RealtimeDetector(app_manager.OSKenApp):
                 flags=dp_ofproto.OFPFF_SEND_FLOW_REM  # Notify khi rule bị xóa
             )
             dp.send_msg(mod)
+            dp.send_msg(dp_parser.OFPBarrierRequest(dp))
+            self._blocked_switches_by_ip[attacker_ip].add(int(dp_id))
 
         block_line = (
             f"BLOCKED [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
@@ -868,13 +954,28 @@ class RealtimeDetector(app_manager.OSKenApp):
         msg = ev.msg
         match = msg.match
 
-        if 'ipv4_src' in match and msg.priority == BLOCK_PRIORITY:
+        if (
+            'ipv4_src' in match
+            and msg.priority == BLOCK_PRIORITY
+            and int(getattr(msg, 'cookie', 0)) == BLOCK_COOKIE
+        ):
             unblocked_ip = match['ipv4_src']
-            if unblocked_ip in self.blocked_ips:
+            remaining = self._blocked_switches_by_ip.get(unblocked_ip, set())
+            remaining.discard(int(msg.datapath.id))
+            if unblocked_ip in self.blocked_ips and not remaining:
                 self.blocked_ips.discard(unblocked_ip)
+                self._blocked_switches_by_ip.pop(unblocked_ip, None)
                 self.logger.info(
                     "\033[93m🔓 UNBLOCKED [%s] IP %s - block timeout expired (%ds)\033[0m",
                     datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                     unblocked_ip, self.block_timeout
                 )
 
+    @set_ev_cls(ofp_event.EventOFPErrorMsg, [CONFIG_DISPATCHER, MAIN_DISPATCHER])
+    def openflow_error_handler(self, ev):
+        """Surface rejected FlowMods instead of silently claiming mitigation."""
+        msg = ev.msg
+        self.logger.error(
+            "[!] OpenFlow error dpid=%s type=0x%02x code=0x%02x xid=%s",
+            getattr(msg.datapath, 'id', '?'), msg.type, msg.code, msg.xid,
+        )

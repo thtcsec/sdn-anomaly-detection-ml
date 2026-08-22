@@ -33,6 +33,7 @@ from sklearn.metrics import (
     precision_recall_fscore_support,
 )
 from sklearn.model_selection import LeaveOneGroupOut
+from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.svm import SVC
 
@@ -104,9 +105,27 @@ def _xy(df: pd.DataFrame, y: pd.Series):
     if leaked:
         raise RuntimeError(f"refusing leak features: {leaked}")
     X = df[cols].apply(pd.to_numeric, errors="coerce")
-    X = X.fillna(X.median(numeric_only=True)).fillna(0.0)
     groups = df["scenario_id"].astype(str)
     return X, y.astype(str), groups, cols
+
+
+def _impute_fold(
+    X_train: pd.DataFrame, X_test: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Fit missing-value statistics on the train fold only.
+
+    ``keep_empty_features`` preserves the declared schema even when a probe
+    column (for example jitter) is entirely absent in one training fold.
+    """
+    imputer = SimpleImputer(
+        strategy="median", keep_empty_features=True, fill_value=0.0,
+    )
+    train_arr = imputer.fit_transform(X_train)
+    test_arr = imputer.transform(X_test)
+    return (
+        pd.DataFrame(train_arr, columns=X_train.columns, index=X_train.index),
+        pd.DataFrame(test_arr, columns=X_test.columns, index=X_test.index),
+    )
 
 
 def _rule_thresholds(X: pd.DataFrame, y: pd.Series) -> dict[str, float]:
@@ -157,9 +176,10 @@ def _loso_ml(name: str, factory, X, y, groups) -> tuple[pd.DataFrame, np.ndarray
     yt_all, yp_all = [], []
     for train_idx, test_idx in logo.split(X, y_enc, groups):
         sc = groups.iloc[test_idx].iloc[0]
+        X_train, X_test = _impute_fold(X.iloc[train_idx], X.iloc[test_idx])
         scaler = StandardScaler()
-        Xtr = scaler.fit_transform(X.iloc[train_idx])
-        Xte = scaler.transform(X.iloc[test_idx])
+        Xtr = scaler.fit_transform(X_train)
+        Xte = scaler.transform(X_test)
         clf = factory()
         clf.fit(Xtr, y_enc[train_idx])
         pred = clf.predict(Xte)
@@ -266,9 +286,25 @@ def _train_normal(X_train: pd.DataFrame, y_train: pd.Series) -> pd.DataFrame:
     return Xn
 
 
+def _impute_normal_only_fold(
+    X_train: pd.DataFrame, y_train: pd.Series, X_test: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Fit one-class preprocessing on train-normal rows only."""
+    Xn_raw = _train_normal(X_train, y_train)
+    imputer = SimpleImputer(
+        strategy="median", keep_empty_features=True, fill_value=0.0,
+    )
+    normal_arr = imputer.fit_transform(Xn_raw)
+    test_arr = imputer.transform(X_test)
+    return (
+        pd.DataFrame(normal_arr, columns=X_train.columns, index=Xn_raw.index),
+        pd.DataFrame(test_arr, columns=X_test.columns, index=X_test.index),
+    )
+
+
 def _if_predict_fold(X_train: pd.DataFrame, y_train: pd.Series, X_test: pd.DataFrame) -> np.ndarray:
     """IsolationForest on Normal-only; contamination=0.05 matches anomaly LOSO."""
-    Xn = _train_normal(X_train, y_train)
+    Xn, X_test = _impute_normal_only_fold(X_train, y_train, X_test)
     scaler = StandardScaler()
     clf = IsolationForest(
         n_estimators=200, contamination=0.05, random_state=42, n_jobs=1,
@@ -327,7 +363,7 @@ def _ae_reconstruct(Xn: np.ndarray, Xt: np.ndarray) -> tuple[np.ndarray, np.ndar
 
 def _ae_predict_fold(X_train: pd.DataFrame, y_train: pd.Series, X_test: pd.DataFrame) -> np.ndarray:
     """Autoencoder on Normal-only; threshold = 95th percentile of train-normal MSE."""
-    Xn = _train_normal(X_train, y_train)
+    Xn, X_test = _impute_normal_only_fold(X_train, y_train, X_test)
     scaler = StandardScaler()
     Xn_s = scaler.fit_transform(Xn)
     Xt_s = scaler.transform(X_test)
@@ -396,6 +432,37 @@ def _write(df: pd.DataFrame, name: str) -> str:
     return path
 
 
+def _scenario_dispersion(summary: pd.DataFrame, n_boot: int = 2500) -> pd.DataFrame:
+    """Scenario-macro spread and cluster bootstrap CI (scenario is the cluster)."""
+    work = summary[summary["held_out_scenario"] != "_pooled"].copy()
+    work = work.dropna(subset=["accuracy", "f1_macro"])
+    rows = []
+    for offset, (model, group) in enumerate(work.groupby("model", sort=True)):
+        values = group[["accuracy", "f1_macro"]].to_numpy(dtype=float)
+        rng = np.random.default_rng(4200 + offset)
+        boot_idx = rng.integers(0, len(values), size=(n_boot, len(values)))
+        boot_means = values[boot_idx].mean(axis=1)
+        rows.append({
+            "model": model,
+            "n_scenarios": int(len(values)),
+            "accuracy_scenario_mean": float(values[:, 0].mean()),
+            "accuracy_scenario_std": float(values[:, 0].std(ddof=0)),
+            "accuracy_scenario_min": float(values[:, 0].min()),
+            "accuracy_scenario_median": float(np.median(values[:, 0])),
+            "accuracy_cluster_bootstrap_ci95_low": float(np.quantile(boot_means[:, 0], 0.025)),
+            "accuracy_cluster_bootstrap_ci95_high": float(np.quantile(boot_means[:, 0], 0.975)),
+            "f1_scenario_mean": float(values[:, 1].mean()),
+            "f1_scenario_std": float(values[:, 1].std(ddof=0)),
+            "f1_scenario_min": float(values[:, 1].min()),
+            "f1_scenario_median": float(np.median(values[:, 1])),
+            "f1_cluster_bootstrap_ci95_low": float(np.quantile(boot_means[:, 1], 0.025)),
+            "f1_cluster_bootstrap_ci95_high": float(np.quantile(boot_means[:, 1], 0.975)),
+            "bootstrap_unit": "held_out_scenario",
+            "n_bootstrap": int(n_boot),
+        })
+    return pd.DataFrame(rows)
+
+
 def _factories(n_class: int):
     out = [
         ("random_forest", lambda: RandomForestClassifier(n_estimators=200, random_state=42)),
@@ -415,7 +482,7 @@ def _factories(n_class: int):
     return out
 
 
-def _run_task(tag: str, X, y, groups, labels, prefix: str) -> None:
+def _run_task(tag: str, X, y, groups, labels, prefix: str, supervised_only: bool = False) -> None:
     print(f"\n=== Protocol {tag.upper()} | classes={list(labels)} | n={len(y)} ===")
     frames = []
     pooled = {}
@@ -425,7 +492,7 @@ def _run_task(tag: str, X, y, groups, labels, prefix: str) -> None:
         pooled[name] = (yt, yp)
         row = tbl[tbl["held_out_scenario"] == "_pooled"].iloc[0]
         print(f"  {name:15s}  Acc={row.accuracy:.4f}  F1-macro={row.f1_macro:.4f}")
-    if tag == "d1":
+    if tag == "d1" and not supervised_only:
         tbl, yt, yp = _loso_unsupervised(
             "isolation_forest", _if_predict_fold, X, y, groups,
         )
@@ -468,6 +535,10 @@ def _run_task(tag: str, X, y, groups, labels, prefix: str) -> None:
 
     summary = pd.concat(frames, ignore_index=True)
     _write(summary, f"{prefix}_{tag}_loso.csv")
+    _write(
+        _scenario_dispersion(summary),
+        f"{prefix}_{tag}_scenario_dispersion.csv",
+    )
     if tag == "d2":
         _write(summary, f"{prefix}_loso_summary.csv")
 
@@ -497,6 +568,11 @@ def main() -> None:
         "--skip-d2",
         action="store_true",
         help="Only regenerate D1 (keeps existing D2 CSVs). Default runs both.",
+    )
+    ap.add_argument(
+        "--supervised-only",
+        action="store_true",
+        help="Run RF/SVM/XGB and rule baseline; skip IF/AE during fast audited reruns.",
     )
     args = ap.parse_args()
 
@@ -529,9 +605,15 @@ def main() -> None:
     print(f"[*] features ({len(cols)}): {cols}")
 
     y1 = y4.where(y4 == "normal", "fault")
-    _run_task("d1", X4, y1, groups, ("normal", "fault"), prefix)
+    _run_task(
+        "d1", X4, y1, groups, ("normal", "fault"), prefix,
+        supervised_only=args.supervised_only,
+    )
     if not args.skip_d2:
-        _run_task("d2", X4, y4, groups, FAMILIES, prefix)
+        _run_task(
+            "d2", X4, y4, groups, FAMILIES, prefix,
+            supervised_only=args.supervised_only,
+        )
     print("[!] Results are observations on this Mininet fault testbed only.")
     print("[!] Unsupervised IF/AE answer D1 (binary) only; D2 4-class stays N/A.")
     print("[!] Do not claim 4-class type classification unless D2 F1-macro ≥ 0.70 "

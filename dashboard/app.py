@@ -2,9 +2,10 @@ import json
 import os
 import sys
 import logging
+import secrets
 import subprocess
 from datetime import datetime
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, abort, jsonify, render_template, request
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE_DIR, 'src'))
@@ -25,17 +26,33 @@ CONFIG_PATH = os.path.join(BASE_DIR, 'dataset', 'controller_config.json')
 MODELS_DIR = os.path.join(BASE_DIR, 'models')
 UPTIME_START = datetime.now()
 
-# 0.0.0.0: Chrome trên Windows mới vào được khi Flask chạy trong WSL.
-DASHBOARD_HOST = os.environ.get('DASHBOARD_HOST', '0.0.0.0')
+# Loopback is the safe default. Non-loopback binding requires an API token.
+DASHBOARD_HOST = os.environ.get('DASHBOARD_HOST', '127.0.0.1')
 DASHBOARD_PORT = int(os.environ.get('DASHBOARD_PORT', '5000'))
+DASHBOARD_API_TOKEN = os.environ.get('DASHBOARD_API_TOKEN', '')
+CSRF_TOKEN = secrets.token_urlsafe(32)
+ALLOWED_TARGETS = {f'10.0.0.{host}' for host in range(1, 7)}
 
 DEFAULT_CONFIG = {
     'polling_interval': 5.0,
     'alert_threshold': 3,
     'block_timeout': 120,
     'mitigation_enabled': True,
-    'selected_model': 'xgboost'
+    'selected_model': 'random_forest_binary'
 }
+
+
+@app.before_request
+def protect_dashboard():
+    if DASHBOARD_HOST not in {'127.0.0.1', 'localhost', '::1'}:
+        supplied = request.headers.get('Authorization', '')
+        expected = f'Bearer {DASHBOARD_API_TOKEN}'
+        if not DASHBOARD_API_TOKEN or not secrets.compare_digest(supplied, expected):
+            abort(401)
+    if request.method in {'POST', 'PUT', 'PATCH', 'DELETE'}:
+        supplied = request.headers.get('X-CSRF-Token', '')
+        if not secrets.compare_digest(supplied, CSRF_TOKEN):
+            abort(403)
 
 
 @app.after_request
@@ -187,7 +204,7 @@ def get_live_state():
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return render_template('index.html', csrf_token=CSRF_TOKEN)
 
 
 @app.route('/api/live_data')
@@ -286,9 +303,16 @@ def handle_simulation():
     """Kích hoạt traffic generator script trong Mininet."""
     try:
         body = request.get_json(silent=True) or {}
-        action_type = body.get('type', 'normal')
-        duration = int(body.get('duration', 8))
-        target = body.get('target', '10.0.0.1')
+        action_type = str(body.get('type', 'normal')).lower()
+        if action_type not in {'normal', 'ddos', 'portscan', 'stop'}:
+            return jsonify({'status': 'error', 'message': 'Loại traffic không hợp lệ.'}), 400
+        duration = max(1, min(60, int(body.get('duration', 8))))
+        target = str(body.get('target', '10.0.0.1'))
+        if target not in ALLOWED_TARGETS:
+            return jsonify({
+                'status': 'error',
+                'message': 'Target chỉ được là host Mininet 10.0.0.1–10.0.0.6.',
+            }), 400
 
         if os.name == 'nt':
             return jsonify({
@@ -415,6 +439,11 @@ def _reachable_ips():
 
 
 if __name__ == '__main__':
+    if DASHBOARD_HOST not in {'127.0.0.1', 'localhost', '::1'} and not DASHBOARD_API_TOKEN:
+        raise RuntimeError(
+            'Non-loopback DASHBOARD_HOST requires DASHBOARD_API_TOKEN. '
+            'Prefer 127.0.0.1 for the thesis demo.'
+        )
     print("=" * 60)
     print("  SDN Anomaly Detection & SOC Monitoring Dashboard")
     print(f"  Bind: {DASHBOARD_HOST}:{DASHBOARD_PORT}")

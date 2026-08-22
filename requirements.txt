@@ -3,7 +3,10 @@
 # Thesis Word must list these same versions (not XGBoost 2.0.3 / sklearn 1.4.2).
 
 os-ken==4.2.0
-xgboost==3.2.0
+# os-ken 4.2 hub (OSKEN_HUB_TYPE=eventlet). Do not rely on a system eventlet.
+eventlet==0.40.3
+# Same lib 3.2.0 as thesis lock. Default pip `xgboost` is a CUDA .so; WSL SOC has no GPU.
+xgboost-cpu==3.2.0
 scikit-learn==1.7.2
 joblib==1.5.2
 imbalanced-learn==0.14.2

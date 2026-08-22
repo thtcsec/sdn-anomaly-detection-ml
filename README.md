@@ -19,7 +19,7 @@ tensorflow 2.21.0     # Autoencoder only; first import is slow (30–180 s)
 pandas 2.3.1
 numpy 2.2.6
 os-ken 4.2.0
-eventlet              # os-ken hub (OSKEN_HUB_TYPE=eventlet)
+eventlet 0.40.3       # os-ken hub (OSKEN_HUB_TYPE=eventlet)
 flask 2.3.3
 ```
 
@@ -27,15 +27,18 @@ Do not install unpinned latest. Do not write XGBoost 2.0.3 / sklearn 1.4.2 in th
 
 On this WSL (Ubuntu 26.04) `python3` may be 3.14; the lock is **3.11**. Use `python3.11` (deadsnakes). Do not create `.venv` with 3.14 — TensorFlow 2.21 / sklearn 1.7 wheels will not match.
 
+Creating `.venv` **on `/mnt/d` (NTFS)** can take hours (`pip` sits in disk-sleep extracting TensorFlow). Prefer an ext4 venv and a symlink so `start_demo.ps1` still works:
+
 ```bash
-python3.11 -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
+python3.11 -m venv /root/sdn-anomaly-venv
+ln -sfn /root/sdn-anomaly-venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
 WSL2 + Mininet + OVS + hping3/nmap/iperf are required only for live demo, not for the evaluation command below.
 
-`tensorflow` is required for Autoencoder eval/load. If you skip AE, you can omit TF, but then `models/autoencoder_model.keras` will not load. The other four live artifacts do not need TensorFlow.
+`tensorflow` is required to import Autoencoder code. On this lab TF 2.21 imports, but `models/autoencoder_model.keras` currently fails `load_model` (Dense variable mismatch). That does not block RF / XGBoost-CPU / SVM / Isolation Forest. First TF import is still slow (30–180 s). Live LinearSVC pickle was saved with sklearn 1.8.0; the lock is 1.7.2 (`InconsistentVersionWarning` only).
 
 ## Reproduce the main table
 

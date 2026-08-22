@@ -30,7 +30,6 @@ INCLUDE_ROOT_FILES = (
 INCLUDE_SCRIPTS = (
     "scripts/trigger_traffic.py",
     "scripts/pack_submission_zip.py",
-    "scripts/render_thesis_figures.py",
 )
 
 INCLUDE_DATASET = (

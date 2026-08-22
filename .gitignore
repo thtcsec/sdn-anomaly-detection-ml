@@ -2,7 +2,12 @@
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyc
+
+# Local venv: on this machine .venv is a WSL ext4 symlink/reparse point.
+# Keep it on disk for pip/WSL; never commit the environment or NTFS copies.
 .venv
+.venv/
 .venv.bak*
 .venv.ntfs.partial
 .wsl-venv-controller/
@@ -12,7 +17,7 @@ ENV/
 # Jupyter Notebook
 .ipynb_checkpoints
 
-# ML Models
+# ML Models (already-tracked *.pkl stay in the index)
 *.pkl
 *.model
 
@@ -25,18 +30,27 @@ HUONG_DAN_THIEN.md
 *.log
 read_docx.py
 test_setup.sh
+tmp_*.sh
+tmp_unpickle.py
 KhoaLuanTotNghiep.docx
+KLTN.pdf
 dist/
 dataset/public_benchmark/
 models/public_benchmark/
+tmp/
+outputs/
 
 # Demo / collection runtime (do not commit)
 dataset/controller.pid
+dataset/alerts.json
+dataset/live_stats.json
 dataset/fault_live/
 dataset/fault_runs/
 dataset/fault_runs_legacy/
-tmp/
+dataset/independent_runs/run_logs/
 
+# Thesis screenshot dumps (official audited figures live in docs/figures/)
+reports/thesis_shots/
 
 # Thesis / doc tooling junk
 pipeline_run_output*.txt
@@ -50,3 +64,10 @@ _*.txt
 *.backup.docx
 khoaluan1.pdf
 _extract_docx.py
+# Untracked duplicate diagram clones (Word uses docs/figures/ audited PNGs)
+reports/data_collection_pipeline.png
+reports/input_method_pipeline.png
+reports/system_architecture_audited.png
+reports/data_protocol_audited.png
+reports/auto_mitigation_audited.png
+reports/shap_realtime_binary_audited.png

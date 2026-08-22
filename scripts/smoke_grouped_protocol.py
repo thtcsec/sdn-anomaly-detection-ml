@@ -1,5 +1,4 @@
-"""
-Smoke checks for the grouped evaluation protocol (no Mininet required).
+"""Smoke the grouped eval protocol (no Mininet). Keep.
 
 Expected with current legacy-only data:
   - ensure_legacy_provenance.py succeeds

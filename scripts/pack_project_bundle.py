@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Đóng gói dự án SDN Anomaly Detection để mang đi review (AI / máy khác).
+Pack a review bundle zip (code/dataset/reports; optional models/docx). Keep.
 
 Bao gồm: code, dataset chính, reports, docs, requirements, README.
 Loại trừ: .venv, .git, __pycache__, log tạm, PDF/DOCX backup nặng (tùy chọn).

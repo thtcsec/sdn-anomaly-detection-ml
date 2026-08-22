@@ -1,0 +1,5 @@
+# Dev-only. Do not add TensorFlow here.
+#   source .venv/bin/activate
+#   pip install -r requirements-dev.txt
+#   pytest tests/ -q
+pytest==8.3.5

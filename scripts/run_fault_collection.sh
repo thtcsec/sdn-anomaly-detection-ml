@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Full fault collection: 12 scenarios x 3 runs. Requires root + os-ken T1.
+# Protocol D fault collect wrapper. Keep. Requires root + free :6633 (do not run during SOC demo).
 set -euo pipefail
 ROOT=/mnt/d/tu_projects/sdn-anomaly-detection-ml
 cd "$ROOT"

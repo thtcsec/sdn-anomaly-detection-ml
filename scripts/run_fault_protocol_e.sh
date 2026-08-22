@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Protocol E fault collection. Does not touch flow_stats.csv / 326k anomaly pool.
+# Protocol E fault collect wrapper. Keep. Does not touch flow_stats.csv / 326k anomaly pool.
 # Does not delete Protocol D dirs under dataset/fault_runs/.
 set -euo pipefail
 ROOT=/mnt/d/tu_projects/sdn-anomaly-detection-ml

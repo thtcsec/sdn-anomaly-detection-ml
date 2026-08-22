@@ -1,4 +1,4 @@
-"""Dong goi zip nop do an: chi file can, khong rac."""
+"""Pack the thesis/submission zip (code + grouped CSV, no .venv). Keep."""
 
 from __future__ import annotations
 

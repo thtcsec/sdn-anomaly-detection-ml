@@ -46,6 +46,7 @@ from model_catalog import (  # noqa: E402
     BINARY_MODELS,
     FEATURE_COLS,
     artifact_paths,
+    build_flow_features,
     feature_columns,
     force_xgboost_cpu,
     inventory,
@@ -53,7 +54,11 @@ from model_catalog import (  # noqa: E402
     model_task,
     train_hint,
 )
-from mitigation_policy import update_consecutive_poll_streaks  # noqa: E402
+from mitigation_policy import (  # noqa: E402
+    BLOCK_FLOW_PRIORITY as BLOCK_PRIORITY,
+    DEFAULT_ALERT_THRESHOLD,
+    update_consecutive_poll_streaks,
+)
 
 from os_ken.base import app_manager
 from os_ken.controller import ofp_event
@@ -69,14 +74,13 @@ CONFIG_PATH = os.path.join(BASE_DIR, 'dataset', 'controller_config.json')
 
 MAX_ALERTS = 500
 MAX_RECENT_FLOWS = 50
-BLOCK_PRIORITY = 1000
 BLOCK_COOKIE = 0x53444E424C4F434B  # ASCII-ish "SDNBLOCK"
 LABEL_MAP = {0: 'DDOS', 1: 'NORMAL', 2: 'PORTSCAN'}
 ALERT_LABELS = frozenset({'DDOS', 'PORTSCAN', 'ANOMALY'})
 
 DEFAULT_CONFIG = {
     'polling_interval': 5.0,
-    'alert_threshold': 3,
+    'alert_threshold': DEFAULT_ALERT_THRESHOLD,
     'block_timeout': 120,
     'mitigation_enabled': True,
     'selected_model': 'random_forest_binary'
@@ -105,7 +109,7 @@ class RealtimeDetector(app_manager.OSKenApp):
 
         # Mitigation & Dynamic Config State
         self.monitor_interval = 5.0
-        self.alert_threshold = 3
+        self.alert_threshold = DEFAULT_ALERT_THRESHOLD
         self.block_timeout = 120
         self.mitigation_enabled = True
         self.selected_model_name = 'random_forest_binary'
@@ -175,7 +179,7 @@ class RealtimeDetector(app_manager.OSKenApp):
                 pass
 
         self.monitor_interval = max(1.0, min(30.0, float(cfg.get('polling_interval', 5.0))))
-        self.alert_threshold = max(1, min(20, int(cfg.get('alert_threshold', 3))))
+        self.alert_threshold = max(1, min(20, int(cfg.get('alert_threshold', DEFAULT_ALERT_THRESHOLD))))
         self.block_timeout = max(10, min(1200, int(cfg.get('block_timeout', 120))))
         self.mitigation_enabled = bool(cfg.get('mitigation_enabled', True))
 
@@ -667,24 +671,17 @@ class RealtimeDetector(app_manager.OSKenApp):
             tp_src = stat.match.get('tcp_src', stat.match.get('udp_src', 0))
             tp_dst = stat.match.get('tcp_dst', stat.match.get('udp_dst', 0))
 
-            duration = stat.duration_sec + stat.duration_nsec / 1e9
-            pkt_per_sec = stat.packet_count / duration if duration > 0 else 0
-            byte_per_sec = stat.byte_count / duration if duration > 0 else 0
-            pkt_size_avg = stat.byte_count / stat.packet_count if stat.packet_count > 0 else 0
-
-            # Build once, then select the exact ordered schema declared by the artifact.
-            feature_values = {
-                'ip_proto': ip_proto,
-                'tp_src': tp_src,
-                'tp_dst': tp_dst,
-                'packet_count': stat.packet_count,
-                'byte_count': stat.byte_count,
-                'duration_sec': stat.duration_sec,
-                'packet_count_per_sec': pkt_per_sec,
-                'byte_count_per_sec': byte_per_sec,
-                'packet_size_avg': pkt_size_avg,
-                'flow_duration': duration,
-            }
+            feature_values = build_flow_features(
+                ip_proto=ip_proto,
+                tp_src=tp_src,
+                tp_dst=tp_dst,
+                packet_count=stat.packet_count,
+                byte_count=stat.byte_count,
+                duration_sec=stat.duration_sec,
+                duration_nsec=stat.duration_nsec,
+            )
+            pkt_per_sec = feature_values['packet_count_per_sec']
+            byte_per_sec = feature_values['byte_count_per_sec']
             features = pd.DataFrame(
                 [[feature_values[col] for col in self.active_feature_cols]],
                 columns=self.active_feature_cols,

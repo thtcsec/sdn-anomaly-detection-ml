@@ -49,6 +49,40 @@ def feature_columns(name: str) -> list[str]:
     return list(FEATURE_COLS)
 
 
+def build_flow_features(
+    *,
+    ip_proto=0,
+    tp_src=0,
+    tp_dst=0,
+    packet_count=0,
+    byte_count=0,
+    duration_sec=0,
+    duration_nsec=0,
+) -> dict:
+    """OpenFlow poll snapshot → feature dict (10-col). Zero duration/count is safe."""
+    duration = float(duration_sec) + float(duration_nsec) / 1e9
+    pkt_per_sec = packet_count / duration if duration > 0 else 0.0
+    byte_per_sec = byte_count / duration if duration > 0 else 0.0
+    pkt_size_avg = byte_count / packet_count if packet_count > 0 else 0.0
+    return {
+        "ip_proto": ip_proto,
+        "tp_src": tp_src,
+        "tp_dst": tp_dst,
+        "packet_count": packet_count,
+        "byte_count": byte_count,
+        "duration_sec": duration_sec,
+        "packet_count_per_sec": pkt_per_sec,
+        "byte_count_per_sec": byte_per_sec,
+        "packet_size_avg": pkt_size_avg,
+        "flow_duration": duration,
+    }
+
+
+def ordered_feature_row(feature_values: dict, name: str) -> list:
+    """Select the artifact schema in catalog order. Missing keys raise KeyError."""
+    return [feature_values[col] for col in feature_columns(name)]
+
+
 def model_task(name: str) -> str:
     name = str(name).lower()
     if name == "random_forest_binary":

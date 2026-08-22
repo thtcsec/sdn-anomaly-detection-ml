@@ -1,7 +1,4 @@
-"""
-Script điều khiển sinh traffic thực nghiệm (Normal, DDoS, Portscan) trong Mininet.
-Có thể gọi trực tiếp từ terminal hoặc qua Dashboard API.
-"""
+"""SOC / Mininet traffic trigger (normal, ddos, portscan, stop). Keep — dashboard /api/simulate."""
 
 import sys
 import os

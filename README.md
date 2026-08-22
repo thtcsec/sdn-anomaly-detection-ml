@@ -130,4 +130,28 @@ models/       random_forest_binary_realtime.pkl (live), xgboost_model.pkl, scale
 reports/      locked CSVs + plots
 dashboard/    Flask SOC (default http://127.0.0.1:5000)
 docs/         evaluation protocol
+scripts/      demo traffic, zip packs, fault-collect wrappers (see below)
+tests/        pytest unit tests (no Mininet / no TensorFlow load)
 ```
+
+## Tests
+
+No Mininet, OpenFlow, or GPU. Default suite does not import TensorFlow / load Autoencoder.
+
+```bash
+source .venv/bin/activate
+pip install -r requirements-dev.txt
+pytest tests/ -q
+```
+
+## Scripts
+
+| File | Purpose |
+|------|---------|
+| `scripts/trigger_traffic.py` | Dashboard SOC “Bắn” / Mininet traffic (hosts 10.0.0.1–6) |
+| `scripts/pack_submission_zip.py` | Submission zip (no `.venv`) |
+| `scripts/pack_project_bundle.py` | Review bundle zip (`--with-models`, `--with-thesis-docx`) |
+| `scripts/smoke_grouped_protocol.py` | Smoke grouped eval protocol without Mininet |
+| `scripts/run_fault_collection.sh` | Protocol D fault collect (needs free `:6633`) |
+| `scripts/run_fault_protocol_e.sh` | Protocol E fault collect (needs free `:6633`) |
+| `start_demo.ps1` / `start_demo.bat` | Open controller + SOC + Mininet windows |

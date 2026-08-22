@@ -10,6 +10,7 @@ from flask import Flask, abort, jsonify, render_template, request
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE_DIR, 'src'))
 from model_catalog import ALLOWED_MODELS, inventory, missing_artifacts, train_hint  # noqa: E402
+from mitigation_policy import DEFAULT_ALERT_THRESHOLD  # noqa: E402
 sys.path.insert(0, BASE_DIR)
 from controller.openflow_bind import any_realtime_controller_running, pid_file_alive  # noqa: E402
 
@@ -35,7 +36,7 @@ ALLOWED_TARGETS = {f'10.0.0.{host}' for host in range(1, 7)}
 
 DEFAULT_CONFIG = {
     'polling_interval': 5.0,
-    'alert_threshold': 3,
+    'alert_threshold': DEFAULT_ALERT_THRESHOLD,
     'block_timeout': 120,
     'mitigation_enabled': True,
     'selected_model': 'random_forest_binary'

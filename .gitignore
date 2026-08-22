@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 .venv
 .venv.bak*
+.venv.ntfs.partial
 .wsl-venv-controller/
 venv/
 ENV/

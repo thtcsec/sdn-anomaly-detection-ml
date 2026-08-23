@@ -118,6 +118,7 @@ sudo PYTHONPATH=/usr/lib/python3/dist-packages python3 src/collect_independent_f
 | `reports/model_comparison.csv` | Appendix (random-flow leakage) |
 | `docs/FAULT_DATASET.md` | Fault collection + D vs E |
 | `docs/THESIS_EVALUATION_PROTOCOL.md` | Evaluation protocol |
+| `docs/CAM_NANG_BAO_VE_FULL.md` | Cẩm nang bảo vệ (số khóa CSV + Word/slides punch list) |
 
 ## Layout
 
@@ -129,7 +130,7 @@ src/          eval_binary_realtime_scenario_held_out.py, realtime_protocol.py, t
 models/       random_forest_binary_realtime.pkl (live), xgboost_model.pkl, scaler.pkl, ...
 reports/      locked CSVs + plots
 dashboard/    Flask SOC (default http://127.0.0.1:5000)
-docs/         evaluation protocol
+docs/         evaluation protocol + `CAM_NANG_BAO_VE_FULL.md` (bảo vệ)
 scripts/      demo traffic, zip packs, fault-collect wrappers (see below)
 tests/        pytest unit tests (no Mininet / no TensorFlow load)
 ```

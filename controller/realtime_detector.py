@@ -44,7 +44,9 @@ sys.path.insert(0, os.path.join(BASE_DIR, "src"))
 from model_catalog import (  # noqa: E402
     ALLOWED_MODELS,
     BINARY_MODELS,
+    DEFAULT_LIVE_MODEL,
     FEATURE_COLS,
+    XGBOOST_CPU_HINT,
     artifact_paths,
     build_flow_features,
     feature_columns,
@@ -52,6 +54,7 @@ from model_catalog import (  # noqa: E402
     inventory,
     missing_artifacts,
     model_task,
+    resolve_live_model,
     train_hint,
 )
 from mitigation_policy import (  # noqa: E402
@@ -183,7 +186,7 @@ class RealtimeDetector(app_manager.OSKenApp):
         self.block_timeout = max(10, min(1200, int(cfg.get('block_timeout', 120))))
         self.mitigation_enabled = bool(cfg.get('mitigation_enabled', True))
 
-        target_model = str(cfg.get('selected_model', 'random_forest_binary')).lower()
+        target_model = str(cfg.get('selected_model', DEFAULT_LIVE_MODEL)).lower()
         if target_model not in ALLOWED_MODELS:
             self.logger.warning("[!] Config selected_model=%s not allowed — ignored", target_model)
         elif initial or target_model != self.selected_model_name or self.model is None:
@@ -271,14 +274,21 @@ class RealtimeDetector(app_manager.OSKenApp):
             return
         missing = missing_artifacts(MODELS_DIR, model_name)
         if missing:
-            self.model_load_status = 'error'
-            self.model_load_message = f"Thiếu file: {missing}. {train_hint(model_name)}"
-            self.logger.warning(
-                "[!] Cannot load %s, missing: %s. Run: %s",
-                model_name, missing, train_hint(model_name),
-            )
-            self._save_live_stats()
-            return
+            resolved, warn = resolve_live_model(MODELS_DIR, model_name)
+            if warn:
+                print(f"[!] {warn}", flush=True)
+                self.logger.warning("[!] %s", warn)
+            if resolved != model_name and not missing_artifacts(MODELS_DIR, resolved):
+                model_name = resolved
+            else:
+                self.model_load_status = 'error'
+                self.model_load_message = f"Thiếu file: {missing}. {train_hint(model_name)}"
+                self.logger.warning(
+                    "[!] Cannot load %s, missing: %s. Run: %s",
+                    model_name, missing, train_hint(model_name),
+                )
+                self._save_live_stats()
+                return
 
         timeout = int(LOAD_TIMEOUT_SEC.get(model_name, 60))
         self._load_generation += 1
@@ -418,6 +428,8 @@ class RealtimeDetector(app_manager.OSKenApp):
             self._load_fail_until[name] = time.time() + LOAD_RETRY_COOLDOWN_SEC
             self.logger.error("[!] Failed to load model %s: %s — keeping previous model", name, err)
             print(f"[!] LOAD FAIL {name}: {err}", flush=True)
+            if name == "xgboost" or "cuda" in str(err).lower():
+                print(f"[!] thieu RF pickle / {XGBOOST_CPU_HINT}", flush=True)
             self._save_live_stats()
             return
         self._commit_loaded_model(

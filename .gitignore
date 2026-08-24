@@ -20,9 +20,16 @@ ENV/
 # Jupyter Notebook
 .ipynb_checkpoints
 
-# ML Models (already-tracked *.pkl stay in the index)
+# ML Models (do not commit every pickle / .venv). Exceptions below are the
+# live demo artifacts clones must have (each <50MB).
 *.pkl
 *.model
+!models/random_forest_binary_realtime.pkl
+!models/random_forest_binary_realtime_scaler.pkl
+!models/random_forest_model.pkl
+!models/random_forest_scaler.pkl
+!models/svm_model.pkl
+!models/svm_scaler.pkl
 
 # OS
 .DS_Store

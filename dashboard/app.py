@@ -9,7 +9,13 @@ from flask import Flask, abort, jsonify, render_template, request
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE_DIR, 'src'))
-from model_catalog import ALLOWED_MODELS, inventory, missing_artifacts, train_hint  # noqa: E402
+from model_catalog import (  # noqa: E402
+    ALLOWED_MODELS,
+    DEFAULT_LIVE_MODEL,
+    inventory,
+    missing_artifacts,
+    train_hint,
+)
 from mitigation_policy import DEFAULT_ALERT_THRESHOLD  # noqa: E402
 sys.path.insert(0, BASE_DIR)
 from controller.openflow_bind import any_realtime_controller_running, pid_file_alive  # noqa: E402
@@ -155,7 +161,7 @@ def get_live_state():
             elif pred == 'NORMAL':
                 normal_cnt += 1
 
-    requested = str(cfg.get('selected_model', 'xgboost')).lower()
+    requested = str(cfg.get('selected_model', DEFAULT_LIVE_MODEL)).lower()
     runtime_model = str((live.get('config') or {}).get('selected_model') or requested).lower()
     models_on_disk = inventory(MODELS_DIR)
     active = str(live.get('active_model') or '').strip().lower()
@@ -423,8 +429,8 @@ def health():
         'status': 'ok',
         'time': datetime.now().isoformat(timespec='seconds'),
         'bind': f'{DASHBOARD_HOST}:{DASHBOARD_PORT}',
-        'model_loaded': not missing_artifacts(MODELS_DIR, cfg.get('selected_model', 'xgboost')),
-        'active_model': cfg.get('selected_model', 'xgboost'),
+        'model_loaded': not missing_artifacts(MODELS_DIR, cfg.get('selected_model', DEFAULT_LIVE_MODEL)),
+        'active_model': cfg.get('selected_model', DEFAULT_LIVE_MODEL),
         'available_models': inventory(MODELS_DIR),
     })
 

@@ -3,5 +3,5 @@
   "alert_threshold": 3,
   "block_timeout": 120,
   "mitigation_enabled": true,
-  "selected_model": "xgboost"
+  "selected_model": "random_forest_binary"
 }

@@ -38,6 +38,20 @@ pip install -r requirements.txt
 
 WSL2 + Mininet + OVS + hping3/nmap/iperf are required only for live demo, not for the evaluation command below.
 
+### Teammate clone (WSL)
+
+`*.pkl` used to be gitignored, so GitHub clones missed `random_forest_binary_realtime.pkl`. That file is now tracked. Recreate the venv from `requirements.txt` (Python **3.11**). Never `pip install xgboost` — that wheel is CUDA and raises `cudaErrorNoDevice` on WSL.
+
+```bash
+git pull
+git checkout -- dataset/controller_config.json
+bash scripts/setup_wsl_venv.sh
+# expect: LOADING RANDOM_FOREST_BINARY  (not XGBOOST)
+python controller/run_realtime.py
+```
+
+Full steps: [`docs/SETUP_MAY_DOI_TAC.md`](docs/SETUP_MAY_DOI_TAC.md). If the RF pickle is still missing after pull, copy `models/random_forest_binary_realtime.pkl` + scaler from Tú, or run `python src/train_realtime_binary.py` (slow).
+
 `tensorflow` is required to import Autoencoder code. On this lab TF 2.21 imports, but `models/autoencoder_model.keras` currently fails `load_model` (Dense variable mismatch). That does not block RF / XGBoost-CPU / SVM / Isolation Forest. First TF import is still slow (30–180 s). Live LinearSVC pickle was saved with sklearn 1.8.0; the lock is 1.7.2 (`InconsistentVersionWarning` only).
 
 ## Reproduce the main table

@@ -24,6 +24,10 @@ ALLOWED_MODELS = (
 MULTICLASS_MODELS = ("xgboost", "random_forest", "svm")
 BINARY_MODELS = ("random_forest_binary", "isolation_forest", "autoencoder")
 
+DEFAULT_LIVE_MODEL = "random_forest_binary"
+SAFE_FALLBACK_MODEL = "svm"
+XGBOOST_CPU_HINT = "pip uninstall xgboost; pip install xgboost-cpu==3.2.0"
+
 FEATURE_COLS = [
     "ip_proto",
     "tp_src",
@@ -157,6 +161,33 @@ def train_hint(name: str) -> str:
         "autoencoder": "python src/train_autoencoder.py",
     }
     return scripts.get(name, "")
+
+
+def resolve_live_model(models_dir: str, requested: str | None) -> tuple[str, str | None]:
+    """Pick a loadable live artifact. Never fall back to xgboost (CUDA wheel).
+
+    Returns ``(model_name, warning_or_none)``.
+    """
+    name = str(requested or DEFAULT_LIVE_MODEL).strip().lower()
+    if name not in ALLOWED_MODELS:
+        name = DEFAULT_LIVE_MODEL
+    miss = missing_artifacts(models_dir, name)
+    if not miss:
+        return name, None
+    miss_names = ",".join(os.path.basename(p) for p in miss)
+    hint = (
+        f"thieu pickle {miss_names} cho {name}. "
+        f"{train_hint(name)} {XGBOOST_CPU_HINT}"
+    ).strip()
+    if name == DEFAULT_LIVE_MODEL:
+        if not missing_artifacts(models_dir, SAFE_FALLBACK_MODEL):
+            msg = (
+                f"thieu RF pickle ({miss_names}); fallback {SAFE_FALLBACK_MODEL} "
+                f"(khong load xgboost CUDA). {XGBOOST_CPU_HINT}"
+            )
+            return SAFE_FALLBACK_MODEL, msg
+        return name, hint
+    return name, hint
 
 
 def force_xgboost_cpu(model) -> None:

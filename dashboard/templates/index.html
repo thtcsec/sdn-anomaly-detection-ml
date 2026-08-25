@@ -773,7 +773,7 @@
                 }
 
                 if (f.blocked) {
-                    actionBadge = `<span class="px-1.5 py-0.5 rounded bg-rose-500 text-white font-bold text-[9px]">BLOCKED</span>`;
+                    actionBadge = `<span class="px-1.5 py-0.5 rounded bg-rose-500 text-white font-bold text-[9px]">DROP</span>`;
                 }
 
                 const protoName = f.ip_proto === 6 ? 'TCP' : (f.ip_proto === 17 ? 'UDP' : (f.ip_proto === 1 ? 'ICMP' : f.ip_proto));
@@ -971,8 +971,8 @@
                     document.getElementById('stat-timeout-display').textContent = (cfg.block_timeout || 120) + 's (Auto-Release)';
                 }
 
-                let currentPps = 0;
-                if (alive && data.recent_flows && data.recent_flows.length) {
+                let currentPps = Number(data.stats.poll_pps || 0);
+                if (!currentPps && data.recent_flows && data.recent_flows.length) {
                     const latestTime = data.recent_flows[data.recent_flows.length - 1].timestamp;
                     const latestSlice = data.recent_flows.filter(f => f.timestamp === latestTime);
                     currentPps = latestSlice.reduce((acc, f) => {

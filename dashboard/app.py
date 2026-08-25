@@ -74,12 +74,13 @@ def harden_headers(resp):
 def load_json(filepath, default):
     if not os.path.exists(filepath):
         return default
-    try:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        return data
-    except (json.JSONDecodeError, OSError):
-        return default
+    for _ in range(2):
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            continue
+    return default
 
 
 def _controller_telemetry_fresh(live, max_age_sec=20):
@@ -99,9 +100,13 @@ def get_live_state():
     live = load_json(LIVE_STATS_LOG, {})
     cfg = load_json(CONFIG_PATH, DEFAULT_CONFIG)
     pid_path = os.path.join(BASE_DIR, 'dataset', 'controller.pid')
+    proc_visible = os.path.isdir('/proc')
     if os.path.exists(pid_path):
         # PID file is source of truth: leftover live_stats.json must not look "CONNECTED".
         controller_alive = pid_file_alive()
+        if not controller_alive and not proc_visible:
+            # Windows dashboard cannot see WSL /proc — trust fresh telemetry.
+            controller_alive = _controller_telemetry_fresh(live, max_age_sec=30)
     else:
         controller_alive = (
             any_realtime_controller_running() and _controller_telemetry_fresh(live)
@@ -111,13 +116,10 @@ def get_live_state():
     if not flows_analyzed and alerts:
         flows_analyzed = max(int(a.get('flows_analyzed', 0) or 0) for a in alerts)
 
-    blocked_from_alerts = {
-        a.get('ip_src', '')
-        for a in alerts
-        if a.get('blocked') and a.get('ip_src')
-    }
-    blocked_from_live = set(live.get('blocked_ips', []))
-    all_blocked = sorted(list(blocked_from_alerts | blocked_from_live))
+    # Blocked count comes from controller live_stats, not OVS grep / alert.blocked flags
+    # (alerts are written before DROP, so blocked=false on almost every row).
+    blocked_from_live = {str(ip) for ip in (live.get('blocked_ips') or []) if ip}
+    all_blocked = sorted(blocked_from_live)
 
     uptime_sec = int((datetime.now() - UPTIME_START).total_seconds())
     last_alert_at = alerts[-1].get('timestamp') if alerts else None
@@ -133,12 +135,12 @@ def get_live_state():
     ]
 
     recent_alerts = alerts[-30:] if isinstance(alerts, list) else []
-    recent_attacker_ips = {a.get('ip_src') for a in recent_alerts[-5:]}
+    flood_sources = {str(ip) for ip in (live.get('flood_sources') or []) if ip}
 
     for h in hosts:
         if h['ip'] in all_blocked:
             h['status'] = 'BLOCKED'
-        elif h['ip'] in recent_attacker_ips:
+        elif h['ip'] in flood_sources:
             h['status'] = 'ATTACKING'
         else:
             h['status'] = 'NORMAL'
@@ -194,6 +196,7 @@ def get_live_state():
             'last_alert_at': last_alert_at,
             'controller_alive': controller_alive,
             'switches_count': 0 if not controller_alive else len(live.get('active_switches', [])),
+            'poll_pps': float(live.get('poll_pps') or 0),
         },
         'traffic_distribution': {
             'NORMAL': normal_cnt,
@@ -235,9 +238,7 @@ def get_alerts():
 @app.route('/api/blocked')
 def get_blocked():
     data = get_live_state()
-    alerts = data['recent_alerts']
-    blocked = [a for a in alerts if a.get('blocked')]
-    return jsonify(blocked[-20:])
+    return jsonify([{'ip': ip, 'blocked': True} for ip in data['blocked_ips']])
 
 
 @app.route('/api/traffic_stats')
@@ -410,6 +411,8 @@ def handle_reset():
         live['portscan_count'] = 0
         live['anomaly_count'] = 0
         live['blocked_ips'] = []
+        live['flood_sources'] = []
+        live['poll_pps'] = 0
         live['recent_flows'] = []
         
         with open(LIVE_STATS_LOG, 'w', encoding='utf-8') as f:

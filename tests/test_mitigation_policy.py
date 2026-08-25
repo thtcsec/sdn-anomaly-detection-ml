@@ -19,6 +19,14 @@ def test_priority_and_streak_constants():
     assert BLOCK_FLOW_PRIORITY == 1000
 
 
+def test_ml_cap_constant_is_realtime_budget():
+    """Per-poll inference cap — sampling is not a change to offline LOSO."""
+    from mitigation_policy import MAX_ML_FLOWS_PER_POLL
+
+    assert MAX_ML_FLOWS_PER_POLL == 256
+    assert 128 <= MAX_ML_FLOWS_PER_POLL <= 256
+
+
 def test_three_poll_streak_reaches_block_threshold():
     streaks = {}
     ip = "10.0.0.4"
@@ -72,3 +80,31 @@ def test_select_streak_ips_h4_flood_only():
         },
     )
     assert chosen == {"10.0.0.4"}
+
+
+def test_select_ml_flows_prefers_high_delta_and_caps():
+    from mitigation_policy import MAX_ML_FLOWS_PER_POLL, select_ml_flows
+
+    flows = [
+        {"ip_src": "10.0.0.5", "packet_delta": 1, "packet_count": 1},
+        {"ip_src": "10.0.0.4", "packet_delta": 80, "packet_count": 80},
+        {"ip_src": "10.0.0.6", "packet_delta": 2, "packet_count": 2},
+    ]
+    assert select_ml_flows(flows, max_n=1) == [1]
+    many = [
+        {"ip_src": "10.0.0.4", "packet_delta": 1, "packet_count": 1}
+        for _ in range(1000)
+    ]
+    picked = select_ml_flows(many)
+    assert len(picked) == MAX_ML_FLOWS_PER_POLL
+
+
+def test_skipped_ml_flood_delta_still_streaks():
+    """Unscored SYN microflows can still increment streak via flood-sized delta."""
+    chosen = select_streak_ips(
+        set(),
+        {"10.0.0.4": 400, "10.0.0.1": 500},
+        skipped_ml_ips={"10.0.0.4", "10.0.0.1"},
+    )
+    assert chosen == {"10.0.0.4"}
+    assert select_streak_ips(set(), {"10.0.0.4": 400}) == set()

@@ -60,6 +60,8 @@ from model_catalog import (  # noqa: E402
 from mitigation_policy import (  # noqa: E402
     BLOCK_FLOW_PRIORITY as BLOCK_PRIORITY,
     DEFAULT_ALERT_THRESHOLD,
+    MAX_ML_FLOWS_PER_POLL,
+    select_ml_flows,
     select_streak_ips,
     update_consecutive_poll_streaks,
 )
@@ -124,6 +126,8 @@ class RealtimeDetector(app_manager.OSKenApp):
         self._poll_generation = 0
         self._poll_observations = None
         self._poll_delta_packets = 0
+        self._poll_pending_flows = []
+        self._poll_started_at = 0.0
         self._last_flood_sources = set()
         self._pending_alerts = []
         self.flows_analyzed = 0
@@ -549,17 +553,8 @@ class RealtimeDetector(app_manager.OSKenApp):
                     f"Đang nạp {self._load_target} {elapsed:.0f}/{self._load_timeout_sec}s"
                 )
             self._reload_config()
-            self._finalize_poll_observations(force=True)
-            self._poll_generation += 1
-            self._poll_delta_packets = 0
-            self._poll_observations = {
-                'generation': self._poll_generation,
-                'seen_dpids': set(),
-                'observed_ips': set(),
-                'anomalous_ips': set(),
-                'labels_by_ip': defaultdict(set),
-                'delta_packets': defaultdict(int),
-            }
+            self._score_pending_and_finalize(force=True)
+            self._start_new_poll()
             for dp_id, dp in self.datapaths.items():
                 self._request_stats(dp)
             self._save_live_stats()
@@ -675,15 +670,41 @@ class RealtimeDetector(app_manager.OSKenApp):
                                   in_port=in_port, actions=actions, data=data)
         datapath.send_msg(out)
 
+    def _start_new_poll(self):
+        """Begin a 5s observation window; do not score until finalize."""
+        self._poll_generation += 1
+        self._poll_delta_packets = 0
+        self._poll_pending_flows = []
+        self._poll_started_at = time.time()
+        self._poll_observations = {
+            'generation': self._poll_generation,
+            'seen_dpids': set(),
+            'observed_ips': set(),
+            'anomalous_ips': set(),
+            'labels_by_ip': defaultdict(set),
+            'delta_packets': defaultdict(int),
+            'skipped_ml_ips': set(),
+        }
+
+    def _flow_stats_reply_more(self, ev):
+        ofproto = ev.msg.datapath.ofproto
+        flags = int(getattr(ev.msg, 'flags', 0) or 0)
+        more_bit = int(getattr(ofproto, 'OFPMPF_REPLY_MORE', 1) or 0)
+        return bool(flags & more_bit)
+
+    def _poll_deadline_reached(self):
+        if self._poll_started_at <= 0:
+            return False
+        return (time.time() - self._poll_started_at) >= float(self.monitor_interval)
+
     @set_ev_cls(ofp_event.EventOFPFlowStatsReply, MAIN_DISPATCHER)
     def flow_stats_reply_handler(self, ev):
-        """Thu thập flow stats và predict real-time."""
-        if self.model is None:
+        """Ingest OpenFlow stats cheaply; ML is capped at finalize (realtime budget)."""
+        if self.model is None or self._poll_observations is None:
             return
 
         body = ev.msg.body
         datapath = ev.msg.datapath
-        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         updated_any = False
 
         for stat in body:
@@ -693,49 +714,8 @@ class RealtimeDetector(app_manager.OSKenApp):
             ip_proto = stat.match.get('ip_proto', 0)
             tp_src = stat.match.get('tcp_src', stat.match.get('udp_src', 0))
             tp_dst = stat.match.get('tcp_dst', stat.match.get('udp_dst', 0))
-
-            feature_values = build_flow_features(
-                ip_proto=ip_proto,
-                tp_src=tp_src,
-                tp_dst=tp_dst,
-                packet_count=stat.packet_count,
-                byte_count=stat.byte_count,
-                duration_sec=stat.duration_sec,
-                duration_nsec=stat.duration_nsec,
-            )
-            pkt_per_sec = feature_values['packet_count_per_sec']
-            byte_per_sec = feature_values['byte_count_per_sec']
-            features = pd.DataFrame(
-                [[feature_values[col] for col in self.active_feature_cols]],
-                columns=self.active_feature_cols,
-            )
-
-            t0 = time.perf_counter()
-            features_scaled = pd.DataFrame(
-                self.scaler.transform(features),
-                columns=self.active_feature_cols,
-            )
-            label = self._predict_label(features_scaled)
-            inf_time = (time.perf_counter() - t0) * 1000.0  # in ms
-            self.last_inference_latency_ms = round(inf_time, 3)
-
-            self.flows_analyzed += 1
-            updated_any = True
-
-            if label == 'NORMAL':
-                self.normal_count += 1
-            elif label == 'DDOS':
-                self.ddos_count += 1
-            elif label == 'PORTSCAN':
-                self.portscan_count += 1
-            elif label == 'ANOMALY':
-                self.anomaly_count += 1
-            else:
-                self.logger.warning("[!] Unmapped prediction %s — not counted as a class", label)
-
             ip_src = stat.match['ipv4_src']
             ip_dst = stat.match['ipv4_dst']
-            is_blocked = (ip_src in self.blocked_ips)
 
             flow_key = (
                 int(datapath.id),
@@ -752,97 +732,176 @@ class RealtimeDetector(app_manager.OSKenApp):
                 delta_pkts = cur_pkts
             else:
                 delta_pkts = max(0, cur_pkts - prev_pkts)
-            delta_pps = delta_pkts / max(0.1, float(self.monitor_interval))
             self._prev_packets[flow_key] = cur_pkts
             if len(self._prev_packets) > 25000:
                 self._prev_packets.clear()
             self._poll_delta_packets += int(delta_pkts)
+            self._record_poll_observation(ip_src, None, delta_pkts)
+            self._poll_pending_flows.append({
+                'ip_src': str(ip_src),
+                'ip_dst': str(ip_dst),
+                'ip_proto': int(ip_proto or 0),
+                'tp_src': int(tp_src or 0),
+                'tp_dst': int(tp_dst or 0),
+                'packet_count': cur_pkts,
+                'byte_count': int(stat.byte_count),
+                'duration_sec': int(stat.duration_sec),
+                'duration_nsec': int(stat.duration_nsec),
+                'packet_delta': int(delta_pkts),
+            })
+            updated_any = True
 
-            self._record_poll_observation(ip_src, label, delta_pkts)
+        if not self._flow_stats_reply_more(ev):
+            self._poll_observations['seen_dpids'].add(int(datapath.id))
 
-            # Record recent flow (kể cả Normal)
+        if updated_any:
+            self._save_live_stats()
+
+        self._score_pending_and_finalize(force=False)
+
+    def _score_pending_and_finalize(self, force=False):
+        """Time-box: finalize after polling_interval even if a switch is still ingesting."""
+        if self._poll_observations is None and not self._poll_pending_flows:
+            return
+        expected = set(int(dpid) for dpid in self.datapaths)
+        obs = self._poll_observations
+        have_all = bool(expected) and obs is not None and obs['seen_dpids'] >= expected
+        if not force and not have_all and not self._poll_deadline_reached():
+            return
+        self._score_pending_flows()
+        self._finalize_poll_observations(force=True)
+
+    def _score_pending_flows(self):
+        """Score at most MAX_ML_FLOWS_PER_POLL flows; remaining still count in poll_pps."""
+        obs = self._poll_observations
+        if self.model is None or self.scaler is None or obs is None:
+            return
+        pending = self._poll_pending_flows
+        self._poll_pending_flows = []
+        if not pending:
+            return
+
+        chosen_idx = select_ml_flows(pending, MAX_ML_FLOWS_PER_POLL)
+        chosen_set = set(chosen_idx)
+        for i, item in enumerate(pending):
+            if i not in chosen_set:
+                obs['skipped_ml_ips'].add(str(item['ip_src']))
+
+        to_score = [pending[i] for i in chosen_idx]
+        if not to_score:
+            return
+
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        interval = max(0.1, float(self.monitor_interval))
+        t0 = time.perf_counter()
+        for item in to_score:
+            feature_values = build_flow_features(
+                ip_proto=item['ip_proto'],
+                tp_src=item['tp_src'],
+                tp_dst=item['tp_dst'],
+                packet_count=item['packet_count'],
+                byte_count=item['byte_count'],
+                duration_sec=item['duration_sec'],
+                duration_nsec=item['duration_nsec'],
+            )
+            pkt_per_sec = feature_values['packet_count_per_sec']
+            byte_per_sec = feature_values['byte_count_per_sec']
+            features = pd.DataFrame(
+                [[feature_values[col] for col in self.active_feature_cols]],
+                columns=self.active_feature_cols,
+            )
+            features_scaled = pd.DataFrame(
+                self.scaler.transform(features),
+                columns=self.active_feature_cols,
+            )
+            label = self._predict_label(features_scaled)
+            self.flows_analyzed += 1
+            if label == 'NORMAL':
+                self.normal_count += 1
+            elif label == 'DDOS':
+                self.ddos_count += 1
+            elif label == 'PORTSCAN':
+                self.portscan_count += 1
+            elif label == 'ANOMALY':
+                self.anomaly_count += 1
+            else:
+                self.logger.warning("[!] Unmapped prediction %s — not counted as a class", label)
+
+            ip_src = item['ip_src']
+            ip_dst = item['ip_dst']
+            delta_pkts = int(item['packet_delta'])
+            delta_pps = delta_pkts / interval
+            self._record_poll_observation(ip_src, label, 0)
+
             flow_entry = {
                 'timestamp': timestamp,
                 'ip_src': ip_src,
                 'ip_dst': ip_dst,
-                'tp_src': int(tp_src),
-                'tp_dst': int(tp_dst),
-                'ip_proto': int(ip_proto),
-                'packet_count': int(stat.packet_count),
+                'tp_src': int(item['tp_src']),
+                'tp_dst': int(item['tp_dst']),
+                'ip_proto': int(item['ip_proto']),
+                'packet_count': int(item['packet_count']),
                 'packet_count_per_sec': round(float(pkt_per_sec), 1),
                 'packet_delta_per_sec': round(float(delta_pps), 1),
                 'byte_count_per_sec': round(float(byte_per_sec), 1),
                 'prediction': label,
-                'blocked': is_blocked,
+                'blocked': ip_src in self.blocked_ips,
                 'model': self.selected_model_name,
-                'latency_ms': self.last_inference_latency_ms
+                'latency_ms': 0.0,
             }
             self.recent_flows.append(flow_entry)
             if len(self.recent_flows) > MAX_RECENT_FLOWS:
                 self.recent_flows = self.recent_flows[-MAX_RECENT_FLOWS:]
 
-            # Alert on attack / anomaly labels only — never invent DDoS from ANOMALY
             if label in ALERT_LABELS:
-                self.logger.debug(
-                    "ALERT [%s] %s -> %s | proto=%s | pkts/s=%.1f | bytes/s=%.1f | "
-                    "prediction=%s (latency=%.3fms)",
-                    timestamp, ip_src, ip_dst, ip_proto, pkt_per_sec, byte_per_sec,
-                    label, self.last_inference_latency_ms,
-                )
-
                 self._append_alert({
                     'timestamp': timestamp,
                     'ip_src': ip_src,
                     'ip_dst': ip_dst,
-                    'tp_dst': int(tp_dst),
-                    'ip_proto': int(ip_proto),
+                    'tp_dst': int(item['tp_dst']),
+                    'ip_proto': int(item['ip_proto']),
                     'packet_count_per_sec': float(pkt_per_sec),
                     'packet_delta_per_sec': float(delta_pps),
                     'byte_count_per_sec': float(byte_per_sec),
                     'prediction': label,
-                    'blocked': is_blocked,
+                    'blocked': ip_src in self.blocked_ips,
                     'flows_analyzed': self.flows_analyzed,
-                    'latency_ms': self.last_inference_latency_ms
+                    'latency_ms': 0.0,
                 })
-            if self.flows_analyzed % 25 == 0:
-                self._flush_pending_alerts()
-                self._save_live_stats()
 
+        inf_ms = (time.perf_counter() - t0) * 1000.0
+        self.last_inference_latency_ms = round(inf_ms / max(1, len(to_score)), 3)
+        n_recent = min(len(to_score), len(self.recent_flows))
+        for flow in self.recent_flows[-n_recent:]:
+            flow['latency_ms'] = self.last_inference_latency_ms
         self._flush_pending_alerts()
-        if self._poll_observations is not None:
-            self._poll_observations['seen_dpids'].add(int(datapath.id))
-            expected = set(int(dpid) for dpid in self.datapaths)
-            if expected and self._poll_observations['seen_dpids'] >= expected:
-                self._finalize_poll_observations()
-
-        if updated_any:
-            self._save_live_stats()
-            print(
-                f"[poll] flows={self.flows_analyzed} "
-                f"normal={self.normal_count} ddos={self.ddos_count} "
-                f"portscan={self.portscan_count} anomaly={self.anomaly_count} "
-                f"pps={self._poll_delta_packets / max(0.1, float(self.monitor_interval)):.0f} "
-                f"model={self.selected_model_name}/{self.model_artifact or '-'} "
-                f"blocked={sorted(self.blocked_ips) or '-'}",
-                flush=True,
+        n_pending = len(pending)
+        n_scored = len(to_score)
+        if n_pending > n_scored:
+            self.logger.info(
+                "[poll] ML cap %d: scored %d/%d flows (realtime budget, not LOSO)",
+                MAX_ML_FLOWS_PER_POLL, n_scored, n_pending,
             )
+        print(
+            f"[poll] flows={self.flows_analyzed} scored={n_scored}/{n_pending} "
+            f"normal={self.normal_count} ddos={self.ddos_count} "
+            f"portscan={self.portscan_count} anomaly={self.anomaly_count} "
+            f"pps={self._poll_delta_packets / interval:.0f} "
+            f"model={self.selected_model_name}/{self.model_artifact or '-'} "
+            f"blocked={sorted(self.blocked_ips) or '-'}",
+            flush=True,
+        )
 
     def _record_poll_observation(self, ip_src, label, delta_packets=0):
         """Aggregate many flow predictions into one source-IP decision per poll."""
         if self._poll_observations is None:
-            self._poll_generation += 1
-            self._poll_observations = {
-                'generation': self._poll_generation,
-                'seen_dpids': set(),
-                'observed_ips': set(),
-                'anomalous_ips': set(),
-                'labels_by_ip': defaultdict(set),
-                'delta_packets': defaultdict(int),
-            }
+            return
         ip_src = str(ip_src)
         self._poll_observations['observed_ips'].add(ip_src)
-        self._poll_observations['labels_by_ip'][ip_src].add(str(label))
         self._poll_observations['delta_packets'][ip_src] += int(delta_packets or 0)
+        if not label:
+            return
+        self._poll_observations['labels_by_ip'][ip_src].add(str(label))
         if label in ALERT_LABELS:
             self._poll_observations['anomalous_ips'].add(ip_src)
 
@@ -858,6 +917,7 @@ class RealtimeDetector(app_manager.OSKenApp):
         flood_ips = select_streak_ips(
             obs['anomalous_ips'],
             obs.get('delta_packets') or {},
+            skipped_ml_ips=obs.get('skipped_ml_ips'),
         )
         self._last_flood_sources = set(flood_ips)
         incremented = update_consecutive_poll_streaks(
@@ -880,6 +940,8 @@ class RealtimeDetector(app_manager.OSKenApp):
                 if datapath is not None:
                     self._block_attacker(datapath, ip_src, '/'.join(labels))
         self._poll_observations = None
+        self._poll_pending_flows = []
+        self._poll_started_at = 0.0
 
     def _save_live_stats(self):
         """Lưu telemetry & live stats ra dataset/live_stats.json cho Dashboard."""
@@ -888,6 +950,7 @@ class RealtimeDetector(app_manager.OSKenApp):
             flood_now = select_streak_ips(
                 obs.get('anomalous_ips') or set(),
                 obs.get('delta_packets') or {},
+                skipped_ml_ips=obs.get('skipped_ml_ips'),
             )
         else:
             flood_now = self._last_flood_sources

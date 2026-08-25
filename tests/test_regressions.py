@@ -89,6 +89,14 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("10.0.0.1", argv)
         self.assertNotIn("--udp", argv)
 
+    def test_realtime_detector_caps_ml_per_poll(self):
+        path = os.path.join(BASE_DIR, "controller", "realtime_detector.py")
+        with open(path, encoding="utf-8") as handle:
+            src = handle.read()
+        self.assertIn("MAX_ML_FLOWS_PER_POLL", src)
+        self.assertIn("realtime budget", src)
+        self.assertIn("_score_pending_and_finalize", src)
+
     def test_rf_binary_predict_uses_ndarray(self):
         path = os.path.join(BASE_DIR, "controller", "realtime_detector.py")
         with open(path, encoding="utf-8") as handle:

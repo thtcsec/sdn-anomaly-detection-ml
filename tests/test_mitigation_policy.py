@@ -140,7 +140,8 @@ def test_microflow_count_is_src_volume_when_delta_lost():
     ) == {"10.0.0.4"}
 
 
-def test_incomplete_poll_holds_streak_without_counting():
+def test_incomplete_poll_increments_ongoing_streak():
+    """Incomplete dump during an attack is not a miss: 2/3 → 3/3."""
     streaks = {"10.0.0.4": 2}
     hold = select_hold_ips(
         observed_ips=set(),
@@ -149,8 +150,11 @@ def test_incomplete_poll_holds_streak_without_counting():
         tracked_streak_ips=streaks,
     )
     assert "10.0.0.4" in hold
-    update_consecutive_poll_streaks(streaks, set(), set(), set(), hold_ips=hold)
-    assert streaks["10.0.0.4"] == 2
+    incremented = update_consecutive_poll_streaks(
+        streaks, set(), set(), set(), hold_ips=hold,
+    )
+    assert incremented == ["10.0.0.4"]
+    assert streaks["10.0.0.4"] == DEFAULT_ALERT_THRESHOLD
 
 
 def test_benign_low_volume_poll_still_resets():
@@ -169,21 +173,74 @@ def test_benign_low_volume_poll_still_resets():
     assert streaks["10.0.0.4"] == 0
 
 
-def test_hold_does_not_count_toward_threshold():
-    """Overload miss keeps 2/3; the third increment still requires a real flood poll."""
+def test_stale_dump_hold_increments_to_block():
+    """2/3 then overload/stale dump must reach 3/3 — freeze at 2/3 is forbidden."""
     streaks = {"10.0.0.4": 2}
-    hold = {"10.0.0.4"}
-    update_consecutive_poll_streaks(
+    hold = select_hold_ips(
+        observed_ips={"10.0.0.4"},
+        flood_ips=set(),
+        delta_packets_by_ip={"10.0.0.4": 0},
+        flow_count_by_ip={"10.0.0.4": 61160},
+        poll_delta_packets=0,
+        tracked_streak_ips=streaks,
+    )
+    assert "10.0.0.4" in hold
+    incremented = update_consecutive_poll_streaks(
         streaks, set(), {"10.0.0.4"}, set(), hold_ips=hold,
     )
-    update_consecutive_poll_streaks(
-        streaks, set(), {"10.0.0.4"}, set(), hold_ips=hold,
-    )
-    assert streaks["10.0.0.4"] == 2
-    update_consecutive_poll_streaks(
-        streaks, {"10.0.0.4"}, {"10.0.0.4"}, set(),
-    )
+    assert incremented == ["10.0.0.4"]
     assert streaks["10.0.0.4"] == DEFAULT_ALERT_THRESHOLD
+
+
+def test_consecutive_stale_holds_never_freeze_at_two():
+    """ANOMALY 1/3 then two stale HOLD+ polls still reach 3/3."""
+    streaks = {"10.0.0.4": 1}
+    for _ in range(2):
+        hold = select_hold_ips(
+            observed_ips={"10.0.0.4"},
+            flood_ips=set(),
+            delta_packets_by_ip={"10.0.0.4": 0},
+            flow_count_by_ip={"10.0.0.4": 400},
+            poll_delta_packets=0,
+            tracked_streak_ips=streaks,
+        )
+        assert "10.0.0.4" in hold
+        update_consecutive_poll_streaks(
+            streaks, set(), {"10.0.0.4"}, set(), hold_ips=hold,
+        )
+    assert streaks["10.0.0.4"] == DEFAULT_ALERT_THRESHOLD
+
+
+def test_true_miss_other_hosts_resets_streak():
+    """Quiet / other hosts, no flood from 10.0.0.4 → reset, not HOLD."""
+    streaks = {"10.0.0.4": 2}
+    hold = select_hold_ips(
+        observed_ips={"10.0.0.1", "10.0.0.2"},
+        flood_ips=set(),
+        delta_packets_by_ip={"10.0.0.1": 8, "10.0.0.2": 4},
+        flow_count_by_ip={"10.0.0.1": 2, "10.0.0.2": 1},
+        poll_delta_packets=12,
+        tracked_streak_ips=streaks,
+    )
+    assert "10.0.0.4" not in hold
+    update_consecutive_poll_streaks(
+        streaks, set(), {"10.0.0.1", "10.0.0.2"}, set(), hold_ips=hold,
+    )
+    assert streaks["10.0.0.4"] == 0
+
+
+def test_hold_never_includes_protected_victims():
+    hold = select_hold_ips(
+        observed_ips={"10.0.0.1", "10.0.0.4"},
+        flood_ips=set(),
+        delta_packets_by_ip={"10.0.0.1": 0, "10.0.0.4": 0},
+        flow_count_by_ip={"10.0.0.1": 500, "10.0.0.4": 500},
+        poll_delta_packets=0,
+        tracked_streak_ips={"10.0.0.1": 2, "10.0.0.4": 2},
+        incomplete=True,
+    )
+    assert "10.0.0.1" not in hold
+    assert "10.0.0.4" in hold
 
 
 def test_zero_pps_microflow_dump_still_reaches_three():

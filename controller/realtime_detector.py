@@ -135,6 +135,7 @@ class RealtimeDetector(app_manager.OSKenApp):
         self._poll_pending_flows = []
         self._poll_started_at = 0.0
         self._poll_xids = set()
+        self._inflight_xids = set()
         self._last_flood_sources = set()
         self._pending_alerts = []
         self.flows_analyzed = 0
@@ -567,12 +568,22 @@ class RealtimeDetector(app_manager.OSKenApp):
         if not self.datapaths:
             hub.sleep(float(self.monitor_interval))
             return
-        cycle_started = time.time()
         interval = float(self.monitor_interval)
+        if self._inflight_xids:
+            wait_end = time.time() + min(POLL_DUMP_GRACE_SEC, interval * 2.0)
+            while time.time() < wait_end and self._inflight_xids:
+                hub.sleep(0.2)
+            if self._inflight_xids:
+                self.logger.info(
+                    "[poll] drop stale in-flight dump xids=%s before next request",
+                    sorted(self._inflight_xids),
+                )
+                self._inflight_xids.clear()
         self._start_new_poll()
         for _dp_id, dp in list(self.datapaths.items()):
             self._request_stats(dp)
 
+        cycle_started = time.time()
         deadline = cycle_started + interval
         while time.time() < deadline and not self._poll_dump_complete():
             hub.sleep(0.2)
@@ -597,6 +608,7 @@ class RealtimeDetector(app_manager.OSKenApp):
         xid = int(getattr(req, 'xid', 0) or 0)
         if xid:
             self._poll_xids.add(xid)
+            self._inflight_xids.add(xid)
 
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
     def switch_features_handler(self, ev):
@@ -751,13 +763,19 @@ class RealtimeDetector(app_manager.OSKenApp):
         for key in list(self._prev_packets.keys())[:excess]:
             self._prev_packets.pop(key, None)
 
+    def _finish_inflight_xid(self, ev, xid):
+        if xid and not self._flow_stats_reply_more(ev):
+            self._inflight_xids.discard(xid)
+
     @set_ev_cls(ofp_event.EventOFPFlowStatsReply, MAIN_DISPATCHER)
     def flow_stats_reply_handler(self, ev):
         """Ingest OpenFlow stats cheaply; ML is capped at finalize (realtime budget)."""
-        if self.model is None or self._poll_observations is None:
-            return
         xid = int(getattr(ev.msg, 'xid', 0) or 0)
         if xid and self._poll_xids and xid not in self._poll_xids:
+            self._finish_inflight_xid(ev, xid)
+            return
+        if self.model is None or self._poll_observations is None:
+            self._finish_inflight_xid(ev, xid)
             return
 
         body = ev.msg.body
@@ -810,6 +828,8 @@ class RealtimeDetector(app_manager.OSKenApp):
 
         if not self._flow_stats_reply_more(ev):
             obs['seen_dpids'].add(int(datapath.id))
+            if xid:
+                self._inflight_xids.discard(xid)
 
     def _score_pending_and_finalize(self, force=False, incomplete=False):
         """Time-box: finalize after polling_interval even if a switch is still ingesting."""
@@ -1014,7 +1034,7 @@ class RealtimeDetector(app_manager.OSKenApp):
             if streak_now <= 0:
                 continue
             self.logger.info(
-                "[POLL] src=%s | HOLD | streak=%d/%d (overload/stale dump, not a miss)",
+                "[POLL] src=%s | HOLD+ | streak=%d/%d (overload/stale dump, not a miss)",
                 ip_src,
                 streak_now,
                 self.alert_threshold,

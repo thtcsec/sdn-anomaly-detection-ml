@@ -84,6 +84,14 @@ def _src_flood_volume(ip, deltas, counts):
     return max(int(deltas.get(ip, 0) or 0), int(counts.get(ip, 0) or 0))
 
 
+def _positive_streak_ips(tracked_streak_ips):
+    """IPs that already have a consecutive-poll streak in progress."""
+    tracked = tracked_streak_ips or {}
+    if hasattr(tracked, "items"):
+        return {str(ip) for ip, n in tracked.items() if int(n or 0) > 0}
+    return {str(ip) for ip in tracked}
+
+
 def select_hold_ips(
     observed_ips,
     flood_ips,
@@ -94,22 +102,21 @@ def select_hold_ips(
     poll_delta_packets=0,
     tracked_streak_ips=None,
 ):
-    """IPs whose streak must not reset this cycle (overload / stale dump / ML cap).
+    """Attacker IPs whose overload/stale dump still counts as a consecutive poll.
 
-    Does not increment. A later poll still needs a real flood observation to
-    reach alert_threshold=3.
+    This is not a miss: the src is still present as the attacker (many flows,
+    last poll already had a streak, or the dump did not finish). Callers must
+    increment these IPs — freezing at 2/3 is forbidden. Victim hosts h1–h3
+    are never held.
     """
-    observed = {str(ip) for ip in (observed_ips or ())}
+    protected = PROTECTED_VICTIM_IPS
+    observed = {str(ip) for ip in (observed_ips or ())} - protected
     flood = {str(ip) for ip in (flood_ips or ())}
     skipped = {str(ip) for ip in (skipped_ml_ips or ())}
     deltas = delta_packets_by_ip or {}
     counts = flow_count_by_ip or {}
-    if incomplete:
-        hold = {str(ip) for ip in (tracked_streak_ips or ())}
-        hold |= observed
-        return hold - flood
-
-    hold = set()
+    ongoing = _positive_streak_ips(tracked_streak_ips) - protected
+    hold = set(ongoing) if incomplete else set()
     ingested = sum(int(v or 0) for v in counts.values())
     pps_dead = int(poll_delta_packets or 0) <= 0
     for ip in observed:
@@ -124,7 +131,9 @@ def select_hold_ips(
             hold.add(ip)
         elif pps_dead and n_flows > 0 and ingested >= MIN_FLOOD_DELTA_PACKETS:
             hold.add(ip)
-    return hold
+        elif ip in ongoing and n_flows > 0 and n_delta < MIN_FLOOD_DELTA_PACKETS and pps_dead:
+            hold.add(ip)
+    return hold - flood
 
 
 def select_ml_flows(flows, max_n=None):
@@ -161,23 +170,21 @@ def update_consecutive_poll_streaks(
 
     Multiple anomalous flows from the same source in one poll count once.
     A completed poll that observes a src without a flood-sized alert resets
-    that src. Overload / stale-dump / ML-cap misses listed in hold_ips keep
-    the current streak (they do not count toward the 3-poll threshold).
+    that src. Overload / stale-dump / ML-cap rows in hold_ips are continued
+    ANOMALY polls: they increment the streak (never freeze at 2/3).
     """
     anomalous = {str(ip) for ip in anomalous_ips}
     observed = {str(ip) for ip in observed_ips}
     blocked = {str(ip) for ip in blocked_ips}
-    hold = {str(ip) for ip in (hold_ips or ())}
+    hold = {str(ip) for ip in (hold_ips or ())} - anomalous
     tracked = set(streaks) | observed
     incremented = []
     for ip_src in tracked:
         if ip_src in blocked:
             continue
-        if ip_src in anomalous:
+        if ip_src in anomalous or ip_src in hold:
             streaks[ip_src] = int(streaks.get(ip_src, 0)) + 1
             incremented.append(ip_src)
-        elif ip_src in hold:
-            continue
         else:
             streaks[ip_src] = 0
     return incremented

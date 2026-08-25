@@ -26,29 +26,105 @@ def is_flood_source(ip_src, delta_packets, protected=None, min_delta=None):
     return int(delta_packets or 0) >= int(min_delta)
 
 
+def aggregate_ip_stats(flows):
+    """Sum packet_delta and flow count per ip_src over the full dump (not the ML cap)."""
+    deltas = {}
+    counts = {}
+    for item in flows or ():
+        ip = str(item.get("ip_src") or "")
+        if not ip:
+            continue
+        deltas[ip] = int(deltas.get(ip, 0)) + int(item.get("packet_delta") or 0)
+        counts[ip] = int(counts.get(ip, 0)) + 1
+    return deltas, counts
+
+
 def select_streak_ips(
     anomalous_ips,
     delta_packets_by_ip,
     protected=None,
     min_delta=None,
     skipped_ml_ips=None,
+    flow_count_by_ip=None,
 ):
     """ANOMALY sources that may increment the 3-poll DROP streak this cycle.
 
-    A src also qualifies if some of its flows were skipped by the per-poll ML
-    cap and its aggregate packet delta this poll is already flood-sized (≥30).
+    Volume is per source IP across the whole dump: many 1-packet SYN microflows
+    still count when their summed packet_delta is flood-sized (≥30), even if
+    every individual 5-tuple is below that. A src also qualifies if some of
+    its flows were skipped by the per-poll ML cap and the aggregate is already
+    flood-sized.
     """
     deltas = delta_packets_by_ip or {}
+    counts = flow_count_by_ip or {}
     chosen = {
         str(ip)
         for ip in anomalous_ips
-        if is_flood_source(ip, deltas.get(str(ip), 0), protected, min_delta)
+        if is_flood_source(
+            ip,
+            _src_flood_volume(str(ip), deltas, counts),
+            protected,
+            min_delta,
+        )
     }
     for ip in skipped_ml_ips or ():
         ip = str(ip)
-        if is_flood_source(ip, deltas.get(ip, 0), protected, min_delta):
+        if is_flood_source(ip, _src_flood_volume(ip, deltas, counts), protected, min_delta):
             chosen.add(ip)
     return chosen
+
+
+def _src_flood_volume(ip, deltas, counts):
+    """Per-IP flood size: summed packet_delta, or microflow count if deltas were 0.
+
+    hping random-sport SYNs are 1-packet 5-tuples. Overlapping dumps often report
+    packet_delta=0 for those rows even while the table still holds tens of
+    thousands of flows from that src — count them as volume, not as a miss.
+    """
+    return max(int(deltas.get(ip, 0) or 0), int(counts.get(ip, 0) or 0))
+
+
+def select_hold_ips(
+    observed_ips,
+    flood_ips,
+    delta_packets_by_ip=None,
+    flow_count_by_ip=None,
+    skipped_ml_ips=None,
+    incomplete=False,
+    poll_delta_packets=0,
+    tracked_streak_ips=None,
+):
+    """IPs whose streak must not reset this cycle (overload / stale dump / ML cap).
+
+    Does not increment. A later poll still needs a real flood observation to
+    reach alert_threshold=3.
+    """
+    observed = {str(ip) for ip in (observed_ips or ())}
+    flood = {str(ip) for ip in (flood_ips or ())}
+    skipped = {str(ip) for ip in (skipped_ml_ips or ())}
+    deltas = delta_packets_by_ip or {}
+    counts = flow_count_by_ip or {}
+    if incomplete:
+        hold = {str(ip) for ip in (tracked_streak_ips or ())}
+        hold |= observed
+        return hold - flood
+
+    hold = set()
+    ingested = sum(int(v or 0) for v in counts.values())
+    pps_dead = int(poll_delta_packets or 0) <= 0
+    for ip in observed:
+        if ip in flood:
+            continue
+        n_flows = int(counts.get(ip, 0) or 0)
+        n_delta = int(deltas.get(ip, 0) or 0)
+        # Busy table, no measured increment: overlapping dump or idle 1-packet SYNs.
+        if n_flows >= MIN_FLOOD_DELTA_PACKETS and n_delta < MIN_FLOOD_DELTA_PACKETS:
+            hold.add(ip)
+        elif ip in skipped:
+            hold.add(ip)
+        elif pps_dead and n_flows > 0 and ingested >= MIN_FLOOD_DELTA_PACKETS:
+            hold.add(ip)
+    return hold
 
 
 def select_ml_flows(flows, max_n=None):
@@ -74,21 +150,34 @@ def select_ml_flows(flows, max_n=None):
     return ranked[:max_n]
 
 
-def update_consecutive_poll_streaks(streaks, anomalous_ips, observed_ips, blocked_ips):
+def update_consecutive_poll_streaks(
+    streaks,
+    anomalous_ips,
+    observed_ips,
+    blocked_ips,
+    hold_ips=None,
+):
     """Update counters once per completed poll and return threshold candidates.
 
     Multiple anomalous flows from the same source in one poll count once.
-    Any completed poll without an anomalous observation resets the streak.
+    A completed poll that observes a src without a flood-sized alert resets
+    that src. Overload / stale-dump / ML-cap misses listed in hold_ips keep
+    the current streak (they do not count toward the 3-poll threshold).
     """
     anomalous = {str(ip) for ip in anomalous_ips}
     observed = {str(ip) for ip in observed_ips}
     blocked = {str(ip) for ip in blocked_ips}
+    hold = {str(ip) for ip in (hold_ips or ())}
     tracked = set(streaks) | observed
     incremented = []
     for ip_src in tracked:
-        if ip_src not in anomalous:
-            streaks[ip_src] = 0
-        elif ip_src not in blocked:
+        if ip_src in blocked:
+            continue
+        if ip_src in anomalous:
             streaks[ip_src] = int(streaks.get(ip_src, 0)) + 1
             incremented.append(ip_src)
+        elif ip_src in hold:
+            continue
+        else:
+            streaks[ip_src] = 0
     return incremented

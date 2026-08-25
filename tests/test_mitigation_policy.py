@@ -7,7 +7,9 @@ from mitigation_policy import (
     DEFAULT_ALERT_THRESHOLD,
     MIN_FLOOD_DELTA_PACKETS,
     PROTECTED_VICTIM_IPS,
+    aggregate_ip_stats,
     is_flood_source,
+    select_hold_ips,
     select_streak_ips,
     update_consecutive_poll_streaks,
 )
@@ -108,3 +110,95 @@ def test_skipped_ml_flood_delta_still_streaks():
     )
     assert chosen == {"10.0.0.4"}
     assert select_streak_ips(set(), {"10.0.0.4": 400}) == set()
+
+
+def test_aggregate_ip_stats_sums_microflow_deltas():
+    flows = [{"ip_src": "10.0.0.4", "packet_delta": 1} for _ in range(40)]
+    flows.append({"ip_src": "10.0.0.6", "packet_delta": 2})
+    deltas, counts = aggregate_ip_stats(flows)
+    assert deltas["10.0.0.4"] == 40
+    assert counts["10.0.0.4"] == 40
+    assert deltas["10.0.0.6"] == 2
+    assert not is_flood_source("10.0.0.4", 1)
+    assert select_streak_ips({"10.0.0.4"}, deltas, flow_count_by_ip=counts) == {"10.0.0.4"}
+
+
+def test_microflow_count_is_src_volume_when_delta_lost():
+    """Overlapping dump: 61k SYN 5-tuples, packet_delta=0, still flood-sized at the IP."""
+    chosen = select_streak_ips(
+        {"10.0.0.4"},
+        {"10.0.0.4": 0},
+        skipped_ml_ips={"10.0.0.4"},
+        flow_count_by_ip={"10.0.0.4": 61160},
+    )
+    assert chosen == {"10.0.0.4"}
+    assert select_streak_ips(
+        set(),
+        {"10.0.0.4": 0},
+        skipped_ml_ips={"10.0.0.4"},
+        flow_count_by_ip={"10.0.0.4": 61160},
+    ) == {"10.0.0.4"}
+
+
+def test_incomplete_poll_holds_streak_without_counting():
+    streaks = {"10.0.0.4": 2}
+    hold = select_hold_ips(
+        observed_ips=set(),
+        flood_ips=set(),
+        incomplete=True,
+        tracked_streak_ips=streaks,
+    )
+    assert "10.0.0.4" in hold
+    update_consecutive_poll_streaks(streaks, set(), set(), set(), hold_ips=hold)
+    assert streaks["10.0.0.4"] == 2
+
+
+def test_benign_low_volume_poll_still_resets():
+    streaks = {"10.0.0.4": 2}
+    hold = select_hold_ips(
+        observed_ips={"10.0.0.4"},
+        flood_ips=set(),
+        delta_packets_by_ip={"10.0.0.4": 4},
+        flow_count_by_ip={"10.0.0.4": 1},
+        poll_delta_packets=4,
+    )
+    assert hold == set()
+    update_consecutive_poll_streaks(
+        streaks, set(), {"10.0.0.4"}, set(), hold_ips=hold,
+    )
+    assert streaks["10.0.0.4"] == 0
+
+
+def test_hold_does_not_count_toward_threshold():
+    """Overload miss keeps 2/3; the third increment still requires a real flood poll."""
+    streaks = {"10.0.0.4": 2}
+    hold = {"10.0.0.4"}
+    update_consecutive_poll_streaks(
+        streaks, set(), {"10.0.0.4"}, set(), hold_ips=hold,
+    )
+    update_consecutive_poll_streaks(
+        streaks, set(), {"10.0.0.4"}, set(), hold_ips=hold,
+    )
+    assert streaks["10.0.0.4"] == 2
+    update_consecutive_poll_streaks(
+        streaks, {"10.0.0.4"}, {"10.0.0.4"}, set(),
+    )
+    assert streaks["10.0.0.4"] == DEFAULT_ALERT_THRESHOLD
+
+
+def test_zero_pps_microflow_dump_still_reaches_three():
+    """Live 1→2, then a silent 60k SYN table (pps=0) still counts as src volume → 3/3."""
+    streaks = {}
+    ip = "10.0.0.4"
+    update_consecutive_poll_streaks(streaks, {ip}, {ip}, set())
+    update_consecutive_poll_streaks(streaks, {ip}, {ip}, set())
+    assert streaks[ip] == 2
+    silent = select_streak_ips(
+        {ip},
+        {ip: 0},
+        skipped_ml_ips={ip},
+        flow_count_by_ip={ip: 61160},
+    )
+    update_consecutive_poll_streaks(streaks, silent, {ip}, set())
+    assert streaks[ip] == DEFAULT_ALERT_THRESHOLD
+    assert DEFAULT_ALERT_THRESHOLD == 3

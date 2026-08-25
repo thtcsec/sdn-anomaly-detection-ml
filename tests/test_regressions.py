@@ -96,6 +96,10 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("MAX_ML_FLOWS_PER_POLL", src)
         self.assertIn("realtime budget", src)
         self.assertIn("_score_pending_and_finalize", src)
+        self.assertIn("select_hold_ips", src)
+        self.assertIn("POLL_DUMP_GRACE_SEC", src)
+        self.assertIn("_run_one_poll_cycle", src)
+        self.assertNotIn("if len(self._prev_packets) > 25000:", src)
 
     def test_rf_binary_predict_uses_ndarray(self):
         path = os.path.join(BASE_DIR, "controller", "realtime_detector.py")

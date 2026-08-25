@@ -51,3 +51,47 @@ def test_index_demo_ddos_duration_h4_only_and_alert_wording(client):
     assert "Bắn DDoS (h4 SYN → h1)" in html
     assert "Anomaly Alerts" in html
     assert "mininet&gt;" in html
+    assert "poll_pps" in html
+
+
+def test_blocked_count_reads_live_stats(client, dashboard_module):
+    import json
+    from datetime import datetime
+
+    live_path = dashboard_module.LIVE_STATS_LOG
+    payload = {
+        "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "blocked_ips": ["10.0.0.4"],
+        "flood_sources": ["10.0.0.4"],
+        "poll_pps": 1234.0,
+        "flows_analyzed": 10,
+        "normal_count": 1,
+        "ddos_count": 0,
+        "portscan_count": 0,
+        "anomaly_count": 9,
+        "active_switches": [1, 2],
+        "recent_flows": [
+            {
+                "ip_src": "10.0.0.4",
+                "ip_dst": "10.0.0.1",
+                "prediction": "ANOMALY",
+                "blocked": True,
+                "packet_delta_per_sec": 80,
+            }
+        ],
+    }
+    with open(live_path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle)
+
+    data = client.get("/api/live_data").get_json()
+    assert data["stats"]["total_ips_blocked"] == 1
+    assert data["blocked_ips"] == ["10.0.0.4"]
+    assert data["stats"]["poll_pps"] == 1234.0
+    by_id = {h["id"]: h["status"] for h in data["hosts"]}
+    assert by_id["h4"] == "BLOCKED"
+    assert by_id["h1"] == "NORMAL"
+    assert by_id["h5"] == "NORMAL"
+    assert by_id["h6"] == "NORMAL"
+
+    blocked = client.get("/api/blocked").get_json()
+    assert blocked == [{"ip": "10.0.0.4", "blocked": True}]

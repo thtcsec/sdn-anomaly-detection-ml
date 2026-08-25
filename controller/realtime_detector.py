@@ -60,6 +60,7 @@ from model_catalog import (  # noqa: E402
 from mitigation_policy import (  # noqa: E402
     BLOCK_FLOW_PRIORITY as BLOCK_PRIORITY,
     DEFAULT_ALERT_THRESHOLD,
+    select_streak_ips,
     update_consecutive_poll_streaks,
 )
 
@@ -122,6 +123,9 @@ class RealtimeDetector(app_manager.OSKenApp):
         self._blocked_switches_by_ip = defaultdict(set)
         self._poll_generation = 0
         self._poll_observations = None
+        self._poll_delta_packets = 0
+        self._last_flood_sources = set()
+        self._pending_alerts = []
         self.flows_analyzed = 0
         self.normal_count = 0
         self.ddos_count = 0
@@ -547,12 +551,14 @@ class RealtimeDetector(app_manager.OSKenApp):
             self._reload_config()
             self._finalize_poll_observations(force=True)
             self._poll_generation += 1
+            self._poll_delta_packets = 0
             self._poll_observations = {
                 'generation': self._poll_generation,
                 'seen_dpids': set(),
                 'observed_ips': set(),
                 'anomalous_ips': set(),
                 'labels_by_ip': defaultdict(set),
+                'delta_packets': defaultdict(int),
             }
             for dp_id, dp in self.datapaths.items():
                 self._request_stats(dp)
@@ -730,7 +736,6 @@ class RealtimeDetector(app_manager.OSKenApp):
             ip_src = stat.match['ipv4_src']
             ip_dst = stat.match['ipv4_dst']
             is_blocked = (ip_src in self.blocked_ips)
-            self._record_poll_observation(ip_src, label)
 
             flow_key = (
                 int(datapath.id),
@@ -742,11 +747,18 @@ class RealtimeDetector(app_manager.OSKenApp):
             )
             prev_pkts = self._prev_packets.get(flow_key)
             cur_pkts = int(stat.packet_count)
+            # First sighting of a 5-tuple (SYN-flood micro-flows): count packets now, not 0.
             if prev_pkts is None:
-                delta_pps = 0.0
+                delta_pkts = cur_pkts
             else:
-                delta_pps = max(0, cur_pkts - prev_pkts) / max(0.1, float(self.monitor_interval))
+                delta_pkts = max(0, cur_pkts - prev_pkts)
+            delta_pps = delta_pkts / max(0.1, float(self.monitor_interval))
             self._prev_packets[flow_key] = cur_pkts
+            if len(self._prev_packets) > 25000:
+                self._prev_packets.clear()
+            self._poll_delta_packets += int(delta_pkts)
+
+            self._record_poll_observation(ip_src, label, delta_pkts)
 
             # Record recent flow (kể cả Normal)
             flow_entry = {
@@ -785,13 +797,18 @@ class RealtimeDetector(app_manager.OSKenApp):
                     'tp_dst': int(tp_dst),
                     'ip_proto': int(ip_proto),
                     'packet_count_per_sec': float(pkt_per_sec),
+                    'packet_delta_per_sec': float(delta_pps),
                     'byte_count_per_sec': float(byte_per_sec),
                     'prediction': label,
                     'blocked': is_blocked,
                     'flows_analyzed': self.flows_analyzed,
                     'latency_ms': self.last_inference_latency_ms
                 })
+            if self.flows_analyzed % 25 == 0:
+                self._flush_pending_alerts()
+                self._save_live_stats()
 
+        self._flush_pending_alerts()
         if self._poll_observations is not None:
             self._poll_observations['seen_dpids'].add(int(datapath.id))
             expected = set(int(dpid) for dpid in self.datapaths)
@@ -804,12 +821,13 @@ class RealtimeDetector(app_manager.OSKenApp):
                 f"[poll] flows={self.flows_analyzed} "
                 f"normal={self.normal_count} ddos={self.ddos_count} "
                 f"portscan={self.portscan_count} anomaly={self.anomaly_count} "
+                f"pps={self._poll_delta_packets / max(0.1, float(self.monitor_interval)):.0f} "
                 f"model={self.selected_model_name}/{self.model_artifact or '-'} "
                 f"blocked={sorted(self.blocked_ips) or '-'}",
                 flush=True,
             )
 
-    def _record_poll_observation(self, ip_src, label):
+    def _record_poll_observation(self, ip_src, label, delta_packets=0):
         """Aggregate many flow predictions into one source-IP decision per poll."""
         if self._poll_observations is None:
             self._poll_generation += 1
@@ -819,10 +837,12 @@ class RealtimeDetector(app_manager.OSKenApp):
                 'observed_ips': set(),
                 'anomalous_ips': set(),
                 'labels_by_ip': defaultdict(set),
+                'delta_packets': defaultdict(int),
             }
         ip_src = str(ip_src)
         self._poll_observations['observed_ips'].add(ip_src)
         self._poll_observations['labels_by_ip'][ip_src].add(str(label))
+        self._poll_observations['delta_packets'][ip_src] += int(delta_packets or 0)
         if label in ALERT_LABELS:
             self._poll_observations['anomalous_ips'].add(ip_src)
 
@@ -835,13 +855,18 @@ class RealtimeDetector(app_manager.OSKenApp):
         if not force and expected and obs['seen_dpids'] < expected:
             return
 
+        flood_ips = select_streak_ips(
+            obs['anomalous_ips'],
+            obs.get('delta_packets') or {},
+        )
+        self._last_flood_sources = set(flood_ips)
         incremented = update_consecutive_poll_streaks(
             self.alert_counter,
-            obs['anomalous_ips'],
+            flood_ips,
             obs['observed_ips'],
             self.blocked_ips,
         )
-        for ip_src in sorted(obs['anomalous_ips']):
+        for ip_src in sorted(flood_ips):
             self.logger.info(
                 "[POLL] src=%s | ANOMALY | streak=%d/%d",
                 ip_src,
@@ -858,38 +883,50 @@ class RealtimeDetector(app_manager.OSKenApp):
 
     def _save_live_stats(self):
         """Lưu telemetry & live stats ra dataset/live_stats.json cho Dashboard."""
-        try:
-            payload = {
-                'updated_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                'controller_pid': os.getpid(),
-                'flows_analyzed': self.flows_analyzed,
-                'normal_count': self.normal_count,
-                'ddos_count': self.ddos_count,
-                'portscan_count': self.portscan_count,
-                'anomaly_count': self.anomaly_count,
-                'model_task': self.model_task,
-                'active_model': self.selected_model_name,
-                'model_artifact': self.model_artifact,
-                'model_load_status': self.model_load_status,
-                'model_load_target': self._load_target,
-                'model_load_elapsed_sec': (
-                    round(time.time() - self._load_started, 1)
-                    if self._loading and self._load_started else 0
-                ),
-                'model_load_timeout_sec': self._load_timeout_sec,
-                'model_load_message': self.model_load_message,
-                'blocked_ips': sorted(list(self.blocked_ips)),
-                'active_switches': list(self.datapaths.keys()),
-                'last_latency_ms': self.last_inference_latency_ms,
-                'recent_flows': self.recent_flows[-30:],
-                'config': {
-                    'polling_interval': self.monitor_interval,
-                    'alert_threshold': self.alert_threshold,
-                    'block_timeout': self.block_timeout,
-                    'mitigation_enabled': self.mitigation_enabled,
-                    'selected_model': self.selected_model_name
-                }
+        obs = self._poll_observations
+        if obs:
+            flood_now = select_streak_ips(
+                obs.get('anomalous_ips') or set(),
+                obs.get('delta_packets') or {},
+            )
+        else:
+            flood_now = self._last_flood_sources
+        payload = {
+            'updated_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'controller_pid': os.getpid(),
+            'flows_analyzed': self.flows_analyzed,
+            'normal_count': self.normal_count,
+            'ddos_count': self.ddos_count,
+            'portscan_count': self.portscan_count,
+            'anomaly_count': self.anomaly_count,
+            'model_task': self.model_task,
+            'active_model': self.selected_model_name,
+            'model_artifact': self.model_artifact,
+            'model_load_status': self.model_load_status,
+            'model_load_target': self._load_target,
+            'model_load_elapsed_sec': (
+                round(time.time() - self._load_started, 1)
+                if self._loading and self._load_started else 0
+            ),
+            'model_load_timeout_sec': self._load_timeout_sec,
+            'model_load_message': self.model_load_message,
+            'blocked_ips': sorted(list(self.blocked_ips)),
+            'flood_sources': sorted(flood_now),
+            'poll_pps': round(
+                self._poll_delta_packets / max(0.1, float(self.monitor_interval)), 1
+            ),
+            'active_switches': list(self.datapaths.keys()),
+            'last_latency_ms': self.last_inference_latency_ms,
+            'recent_flows': self.recent_flows[-30:],
+            'config': {
+                'polling_interval': self.monitor_interval,
+                'alert_threshold': self.alert_threshold,
+                'block_timeout': self.block_timeout,
+                'mitigation_enabled': self.mitigation_enabled,
+                'selected_model': self.selected_model_name
             }
+        }
+        try:
             tmp = LIVE_STATS_LOG + '.tmp'
             with open(tmp, 'w', encoding='utf-8') as f:
                 json.dump(payload, f, ensure_ascii=False, indent=2)
@@ -898,7 +935,14 @@ class RealtimeDetector(app_manager.OSKenApp):
             self.logger.error("[!] Failed to write live stats: %s", exc)
 
     def _append_alert(self, alert):
-        """Ghi alert ra dataset/alerts.json (atomic) để Web Dashboard đọc."""
+        """Buffer a dashboard alert; flush in batches so SYN-flood I/O cannot stall polls."""
+        self._pending_alerts.append(alert)
+
+    def _flush_pending_alerts(self):
+        pending = self._pending_alerts
+        if not pending:
+            return
+        self._pending_alerts = []
         try:
             alerts = []
             if os.path.exists(ALERT_LOG):
@@ -906,7 +950,7 @@ class RealtimeDetector(app_manager.OSKenApp):
                     alerts = json.load(f)
                     if not isinstance(alerts, list):
                         alerts = []
-            alerts.append(alert)
+            alerts.extend(pending)
             if len(alerts) > MAX_ALERTS:
                 alerts = alerts[-MAX_ALERTS:]
             tmp_path = ALERT_LOG + '.tmp'
@@ -964,6 +1008,11 @@ class RealtimeDetector(app_manager.OSKenApp):
 
         # Reset counter sau khi block
         self.alert_counter[attacker_ip] = 0
+        for flow in self.recent_flows:
+            if flow.get('ip_src') == attacker_ip:
+                flow['blocked'] = True
+        self._flush_pending_alerts()
+        self._save_live_stats()
 
     @set_ev_cls(ofp_event.EventOFPFlowRemoved, MAIN_DISPATCHER)
     def flow_removed_handler(self, ev):

@@ -42,3 +42,12 @@ def test_stats_shape_with_missing_telemetry(client):
     assert "total_flows_analyzed" in payload
     assert "controller_alive" in payload
     assert payload["controller_alive"] in (True, False)
+    assert "total_attacks_detected" in payload
+
+
+def test_index_demo_ddos_duration_h4_only_and_alert_wording(client):
+    html = client.get("/").get_data(as_text=True)
+    assert "triggerSimulate('ddos', 25)" in html
+    assert "Bắn DDoS (h4 SYN → h1)" in html
+    assert "Anomaly Alerts" in html
+    assert "mininet&gt;" in html

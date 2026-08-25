@@ -75,7 +75,7 @@ ALERT_LOG = os.path.join(BASE_DIR, 'dataset', 'alerts.json')
 LIVE_STATS_LOG = os.path.join(BASE_DIR, 'dataset', 'live_stats.json')
 CONFIG_PATH = os.path.join(BASE_DIR, 'dataset', 'controller_config.json')
 
-MAX_ALERTS = 500
+MAX_ALERTS = 500  # dashboard ANOMALY ALERTS = len(alerts) cap; not 500 attacks
 MAX_RECENT_FLOWS = 50
 BLOCK_COOKIE = 0x53444E424C4F434B  # ASCII-ish "SDNBLOCK"
 LABEL_MAP = {0: 'DDOS', 1: 'NORMAL', 2: 'PORTSCAN'}
@@ -500,12 +500,17 @@ class RealtimeDetector(app_manager.OSKenApp):
 
     def _predict_label(self, features_scaled_df):
         name = self.selected_model_name
+        # 8-col schema unchanged. RF binary (and RF fit on ndarray) has no
+        # feature_names_in_ — predict on X, not a named DataFrame.
         X = np.asarray(features_scaled_df, dtype=np.float64)
-        if name in ("xgboost", "random_forest", "svm"):
+        if name in ("xgboost", "svm"):
             pred = int(self.model.predict(features_scaled_df)[0])
             return LABEL_MAP.get(pred, "UNKNOWN")
+        if name == "random_forest":
+            pred = int(self.model.predict(X)[0])
+            return LABEL_MAP.get(pred, "UNKNOWN")
         if name == "random_forest_binary":
-            pred = int(self.model.predict(features_scaled_df)[0])
+            pred = int(self.model.predict(X)[0])
             return "ANOMALY" if pred == 1 else "NORMAL" if pred == 0 else "UNKNOWN"
         if name == "isolation_forest":
             raw = int(self.model.predict(X)[0])
@@ -766,15 +771,11 @@ class RealtimeDetector(app_manager.OSKenApp):
 
             # Alert on attack / anomaly labels only — never invent DDoS from ANOMALY
             if label in ALERT_LABELS:
-                alert_line = (
-                    f"ALERT [{timestamp}] {ip_src} -> {ip_dst} | proto={ip_proto} | "
-                    f"pkts/s={pkt_per_sec:.1f} | bytes/s={byte_per_sec:.1f} | "
-                    f"prediction={label}"
-                )
-                print(f"\033[91m⚠️  {alert_line}\033[0m", flush=True)
-                self.logger.warning(
-                    "\033[91m⚠️  %s (latency=%.3fms)\033[0m",
-                    alert_line, self.last_inference_latency_ms
+                self.logger.debug(
+                    "ALERT [%s] %s -> %s | proto=%s | pkts/s=%.1f | bytes/s=%.1f | "
+                    "prediction=%s (latency=%.3fms)",
+                    timestamp, ip_src, ip_dst, ip_proto, pkt_per_sec, byte_per_sec,
+                    label, self.last_inference_latency_ms,
                 )
 
                 self._append_alert({
@@ -840,6 +841,13 @@ class RealtimeDetector(app_manager.OSKenApp):
             obs['observed_ips'],
             self.blocked_ips,
         )
+        for ip_src in sorted(obs['anomalous_ips']):
+            self.logger.info(
+                "[POLL] src=%s | ANOMALY | streak=%d/%d",
+                ip_src,
+                int(self.alert_counter.get(ip_src, 0)),
+                self.alert_threshold,
+            )
         for ip_src in incremented:
             if self.mitigation_enabled and self.alert_counter[ip_src] >= self.alert_threshold:
                 labels = sorted(obs['labels_by_ip'].get(ip_src) or {'ANOMALY'})

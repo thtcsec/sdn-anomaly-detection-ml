@@ -176,6 +176,7 @@ def get_live_state():
     return {
         'stats': {
             'total_flows_analyzed': flows_analyzed,
+            # Card "ANOMALY ALERTS": len(alerts.json). Controller caps at MAX_ALERTS=500 — not 500 attacks.
             'total_attacks_detected': len(alerts),
             'total_ips_blocked': len(all_blocked),
             'uptime_seconds': uptime_sec,

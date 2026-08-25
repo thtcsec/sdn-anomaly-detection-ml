@@ -14,7 +14,7 @@ sys.path.insert(0, BASE_DIR)
 from eval_fault_loso import _impute_fold, _impute_normal_only_fold
 from mitigation_policy import update_consecutive_poll_streaks
 from model_catalog import feature_columns, model_task
-from trigger_traffic import validate_target
+from trigger_traffic import trigger_ddos, validate_target
 from dashboard import app as dashboard_app
 
 
@@ -60,6 +60,46 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(validate_target("10.0.0.6"), "10.0.0.6")
         with self.assertRaises(Exception):
             validate_target("8.8.8.8")
+
+    def test_trigger_ddos_default_is_h4_syn_25s(self):
+        import trigger_traffic as tt
+
+        calls = []
+
+        def fake_run(pid, argv, bg=True):
+            calls.append((pid, list(argv)))
+            return True
+
+        original_pids = tt.get_mininet_host_pids
+        original_run = tt.run_in_host
+        tt.get_mininet_host_pids = lambda: {"h4": "104", "h5": "105"}
+        tt.run_in_host = fake_run
+        try:
+            self.assertTrue(trigger_ddos("10.0.0.1"))
+        finally:
+            tt.get_mininet_host_pids = original_pids
+            tt.run_in_host = original_run
+        self.assertEqual(len(calls), 1)
+        pid, argv = calls[0]
+        self.assertEqual(pid, "104")
+        self.assertEqual(argv[0], "timeout")
+        self.assertEqual(argv[1], "25")
+        self.assertIn("hping3", argv)
+        self.assertIn("-S", argv)
+        self.assertIn("10.0.0.1", argv)
+        self.assertNotIn("--udp", argv)
+
+    def test_rf_binary_predict_uses_ndarray(self):
+        path = os.path.join(BASE_DIR, "controller", "realtime_detector.py")
+        with open(path, encoding="utf-8") as handle:
+            src = handle.read()
+        self.assertIn('if name == "random_forest_binary":', src)
+        self.assertIn("self.model.predict(X)[0]", src)
+        self.assertNotIn(
+            "if name == \"random_forest_binary\":\n"
+            "            pred = int(self.model.predict(features_scaled_df)[0])",
+            src,
+        )
 
     def test_dashboard_rejects_post_without_csrf(self):
         client = dashboard_app.app.test_client()

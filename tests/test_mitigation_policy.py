@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from mitigation_policy import (
+    BLOCK_COOKIE,
     BLOCK_FLOW_PRIORITY,
     DEFAULT_ALERT_THRESHOLD,
     MIN_FLOOD_DELTA_PACKETS,
     PROTECTED_VICTIM_IPS,
     aggregate_ip_stats,
+    drop_attack_type,
     is_flood_source,
+    may_install_drop,
     select_hold_ips,
     select_streak_ips,
     update_consecutive_poll_streaks,
@@ -19,6 +22,7 @@ def test_priority_and_streak_constants():
     """Thesis/demo mitigation: 3 consecutive polls, DROP priority 1000."""
     assert DEFAULT_ALERT_THRESHOLD == 3
     assert BLOCK_FLOW_PRIORITY == 1000
+    assert BLOCK_COOKIE == 0x53444E424C4F434B
 
 
 def test_ml_cap_constant_is_realtime_budget():
@@ -259,3 +263,142 @@ def test_zero_pps_microflow_dump_still_reaches_three():
     update_consecutive_poll_streaks(streaks, silent, {ip}, set())
     assert streaks[ip] == DEFAULT_ALERT_THRESHOLD
     assert DEFAULT_ALERT_THRESHOLD == 3
+
+
+def test_idle_startup_never_holds_or_blocks():
+    """pps=0 all-NORMAL leftover table must not HOLD+ or reach 3/3."""
+    streaks = {}
+    observed = {"10.0.0.4", "10.0.0.5", "10.0.0.6", "10.0.0.1"}
+    deltas = {ip: 0 for ip in observed}
+    counts = {"10.0.0.4": 80, "10.0.0.5": 80, "10.0.0.6": 80, "10.0.0.1": 40}
+    for _ in range(DEFAULT_ALERT_THRESHOLD):
+        hold = select_hold_ips(
+            observed_ips=observed,
+            flood_ips=set(),
+            delta_packets_by_ip=deltas,
+            flow_count_by_ip=counts,
+            poll_delta_packets=0,
+            tracked_streak_ips=streaks,
+            last_anomaly_flood_ips=set(),
+        )
+        assert hold == set()
+        update_consecutive_poll_streaks(
+            streaks, set(), observed, set(), hold_ips=hold,
+        )
+    assert streaks.get("10.0.0.4", 0) == 0
+    assert streaks.get("10.0.0.5", 0) == 0
+    assert streaks.get("10.0.0.6", 0) == 0
+
+
+def test_hold_does_not_fire_on_normal_without_prior_anomaly():
+    """Stale dump + many NORMAL flows must not HOLD+ any src from streak 0."""
+    hold = select_hold_ips(
+        observed_ips={"10.0.0.4", "10.0.0.5", "10.0.0.6"},
+        flood_ips=set(),
+        delta_packets_by_ip={"10.0.0.4": 0, "10.0.0.5": 0, "10.0.0.6": 0},
+        flow_count_by_ip={"10.0.0.4": 100, "10.0.0.5": 80, "10.0.0.6": 60},
+        poll_delta_packets=0,
+        tracked_streak_ips={"10.0.0.4": 0, "10.0.0.5": 0, "10.0.0.6": 0},
+    )
+    assert hold == set()
+    streaks = {"10.0.0.4": 0, "10.0.0.5": 0, "10.0.0.6": 0}
+    update_consecutive_poll_streaks(
+        streaks, set(), {"10.0.0.4", "10.0.0.5", "10.0.0.6"}, set(),
+        hold_ips={"10.0.0.4", "10.0.0.5", "10.0.0.6"},
+    )
+    assert streaks["10.0.0.4"] == 0
+    assert streaks["10.0.0.5"] == 0
+    assert streaks["10.0.0.6"] == 0
+
+
+def test_hold_increments_only_after_anomaly():
+    """HOLD+ continues a flood streak; idle first polls do not start one."""
+    streaks = {}
+    ip = "10.0.0.4"
+    idle = select_hold_ips(
+        observed_ips={ip, "10.0.0.5", "10.0.0.6"},
+        flood_ips=set(),
+        delta_packets_by_ip={ip: 0, "10.0.0.5": 0, "10.0.0.6": 0},
+        flow_count_by_ip={ip: 80, "10.0.0.5": 80, "10.0.0.6": 80},
+        poll_delta_packets=0,
+        tracked_streak_ips=streaks,
+        last_anomaly_flood_ips=set(),
+    )
+    assert idle == set()
+    update_consecutive_poll_streaks(streaks, set(), {ip}, set(), hold_ips=idle)
+    assert streaks.get(ip, 0) == 0
+
+    update_consecutive_poll_streaks(streaks, {ip}, {ip}, set())
+    assert streaks[ip] == 1
+    last_flood = {ip}
+    others = {"10.0.0.5", "10.0.0.6"}
+    for _ in range(2):
+        hold = select_hold_ips(
+            observed_ips={ip, *others},
+            flood_ips=set(),
+            delta_packets_by_ip={ip: 0, "10.0.0.5": 2, "10.0.0.6": 1},
+            flow_count_by_ip={ip: 400, "10.0.0.5": 2, "10.0.0.6": 1},
+            poll_delta_packets=0,
+            tracked_streak_ips=streaks,
+            last_anomaly_flood_ips=last_flood,
+        )
+        assert hold == {ip}
+        update_consecutive_poll_streaks(
+            streaks, set(), {ip, *others}, set(), hold_ips=hold,
+        )
+    assert streaks[ip] == DEFAULT_ALERT_THRESHOLD
+    assert streaks.get("10.0.0.5", 0) == 0
+    assert streaks.get("10.0.0.6", 0) == 0
+
+
+def test_true_miss_resets_even_after_hold_eligible_volume():
+    """Quiet poll without 10.0.0.4 flood volume → reset, not HOLD+."""
+    streaks = {"10.0.0.4": 2}
+    hold = select_hold_ips(
+        observed_ips={"10.0.0.1", "10.0.0.2", "10.0.0.5"},
+        flood_ips=set(),
+        delta_packets_by_ip={"10.0.0.1": 4, "10.0.0.2": 3, "10.0.0.5": 2},
+        flow_count_by_ip={"10.0.0.1": 1, "10.0.0.2": 1, "10.0.0.5": 1},
+        poll_delta_packets=9,
+        tracked_streak_ips=streaks,
+        last_anomaly_flood_ips={"10.0.0.4"},
+    )
+    assert "10.0.0.4" not in hold
+    update_consecutive_poll_streaks(
+        streaks, set(), {"10.0.0.1", "10.0.0.2", "10.0.0.5"}, set(), hold_ips=hold,
+    )
+    assert streaks["10.0.0.4"] == 0
+
+
+def test_protected_victims_never_drop():
+    for ip in PROTECTED_VICTIM_IPS:
+        assert not may_install_drop(ip, "ANOMALY")
+        assert not may_install_drop(ip, "DDOS")
+        hold = select_hold_ips(
+            observed_ips={ip, "10.0.0.4"},
+            flood_ips=set(),
+            delta_packets_by_ip={ip: 0, "10.0.0.4": 0},
+            flow_count_by_ip={ip: 500, "10.0.0.4": 500},
+            poll_delta_packets=0,
+            tracked_streak_ips={ip: 2, "10.0.0.4": 2},
+            last_anomaly_flood_ips={ip, "10.0.0.4"},
+        )
+        assert ip not in hold
+    assert not may_install_drop("10.0.0.4", "NORMAL")
+    assert not may_install_drop("10.0.0.4", "NORMAL/NORMAL")
+    assert may_install_drop("10.0.0.4", "ANOMALY")
+    assert may_install_drop("10.0.0.4", "DDOS")
+    assert drop_attack_type({"NORMAL"}, last_alert_label="ANOMALY", is_hold=True) == "ANOMALY"
+    assert drop_attack_type({"NORMAL"}, is_hold=False) == "NORMAL"
+
+
+def test_skipped_ml_normal_idle_does_not_streak():
+    """ML cap leftover NORMAL flows are not a silent flood."""
+    chosen = select_streak_ips(
+        set(),
+        {"10.0.0.4": 0, "10.0.0.5": 0},
+        skipped_ml_ips={"10.0.0.4", "10.0.0.5"},
+        flow_count_by_ip={"10.0.0.4": 100, "10.0.0.5": 80},
+        normal_ips={"10.0.0.4", "10.0.0.5"},
+    )
+    assert chosen == set()

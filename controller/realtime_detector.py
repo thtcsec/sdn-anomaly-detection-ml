@@ -58,10 +58,14 @@ from model_catalog import (  # noqa: E402
     train_hint,
 )
 from mitigation_policy import (  # noqa: E402
+    BLOCK_COOKIE,
     BLOCK_FLOW_PRIORITY as BLOCK_PRIORITY,
     DEFAULT_ALERT_THRESHOLD,
     MAX_ML_FLOWS_PER_POLL,
+    PROTECTED_VICTIM_IPS,
     aggregate_ip_stats,
+    drop_attack_type,
+    may_install_drop,
     select_hold_ips,
     select_ml_flows,
     select_streak_ips,
@@ -82,7 +86,9 @@ CONFIG_PATH = os.path.join(BASE_DIR, 'dataset', 'controller_config.json')
 
 MAX_ALERTS = 500  # dashboard ANOMALY ALERTS = len(alerts) cap; not 500 attacks
 MAX_RECENT_FLOWS = 50
-BLOCK_COOKIE = 0x53444E424C4F434B  # ASCII-ish "SDNBLOCK"
+# BLOCK_COOKIE = SDNBLOCK. Manual unblock (cookie match only — do not bare del-flows):
+#   ovs-ofctl -O OpenFlow13 del-flows s1 cookie=0x53444e424c4f434b/-1
+#   ovs-ofctl -O OpenFlow13 del-flows s2 cookie=0x53444e424c4f434b/-1
 LABEL_MAP = {0: 'DDOS', 1: 'NORMAL', 2: 'PORTSCAN'}
 ALERT_LABELS = frozenset({'DDOS', 'PORTSCAN', 'ANOMALY'})
 
@@ -137,6 +143,7 @@ class RealtimeDetector(app_manager.OSKenApp):
         self._poll_xids = set()
         self._inflight_xids = set()
         self._last_flood_sources = set()
+        self._last_alert_label = {}
         self._pending_alerts = []
         self.flows_analyzed = 0
         self.normal_count = 0
@@ -996,11 +1003,18 @@ class RealtimeDetector(app_manager.OSKenApp):
         if not force and expected and obs['seen_dpids'] < expected:
             return
 
+        labels_by_ip = obs.get('labels_by_ip') or {}
+        normal_ips = {
+            str(ip)
+            for ip, labs in labels_by_ip.items()
+            if labs and not ({str(x) for x in labs} & ALERT_LABELS)
+        }
         flood_ips = select_streak_ips(
             obs['anomalous_ips'],
             obs.get('delta_packets') or {},
             skipped_ml_ips=obs.get('skipped_ml_ips'),
             flow_count_by_ip=obs.get('flow_count') or {},
+            normal_ips=normal_ips,
         )
         hold_ips = select_hold_ips(
             obs['observed_ips'],
@@ -1011,8 +1025,8 @@ class RealtimeDetector(app_manager.OSKenApp):
             incomplete=bool(obs.get('incomplete')),
             poll_delta_packets=int(obs.get('poll_delta_packets') or self._poll_delta_packets or 0),
             tracked_streak_ips=self.alert_counter,
+            last_anomaly_flood_ips=self._last_flood_sources,
         )
-        self._last_flood_sources = set(flood_ips)
         incremented = update_consecutive_poll_streaks(
             self.alert_counter,
             flood_ips,
@@ -1020,6 +1034,10 @@ class RealtimeDetector(app_manager.OSKenApp):
             self.blocked_ips,
             hold_ips=hold_ips,
         )
+        for ip_src in flood_ips:
+            labs = {str(x) for x in (labels_by_ip.get(ip_src) or ())}
+            alerts = labs & ALERT_LABELS
+            self._last_alert_label[ip_src] = '/'.join(sorted(alerts)) if alerts else 'ANOMALY'
         for ip_src in sorted(flood_ips):
             self.logger.info(
                 "[POLL] src=%s | ANOMALY | streak=%d/%d",
@@ -1040,11 +1058,36 @@ class RealtimeDetector(app_manager.OSKenApp):
                 self.alert_threshold,
             )
         for ip_src in incremented:
-            if self.mitigation_enabled and self.alert_counter[ip_src] >= self.alert_threshold:
-                labels = sorted(obs['labels_by_ip'].get(ip_src) or {'ANOMALY'})
-                datapath = next(iter(self.datapaths.values()), None)
-                if datapath is not None:
-                    self._block_attacker(datapath, ip_src, '/'.join(labels))
+            if not (
+                self.mitigation_enabled
+                and int(self.alert_counter.get(ip_src, 0) or 0) >= self.alert_threshold
+            ):
+                continue
+            is_hold = ip_src in hold_ips and ip_src not in flood_ips
+            if ip_src not in flood_ips and not is_hold:
+                continue
+            attack_type = drop_attack_type(
+                labels_by_ip.get(ip_src),
+                self._last_alert_label.get(ip_src),
+                is_hold=is_hold,
+            )
+            if not may_install_drop(ip_src, attack_type):
+                self.logger.warning(
+                    "[poll] refuse DROP src=%s attack=%s", ip_src, attack_type,
+                )
+                continue
+            datapath = next(iter(self.datapaths.values()), None)
+            if datapath is not None:
+                self._block_attacker(datapath, ip_src, attack_type)
+        live = {
+            ip for ip, n in self.alert_counter.items() if int(n or 0) > 0
+        } - set(self.blocked_ips)
+        self._last_flood_sources = (
+            set(flood_ips) | set(hold_ips) | set(self._last_flood_sources)
+        ) & live
+        for ip in list(self._last_alert_label):
+            if ip not in live and ip not in self.blocked_ips:
+                self._last_alert_label.pop(ip, None)
         if self._poll_observations is obs:
             self._poll_observations = None
             self._poll_pending_flows = []
@@ -1138,7 +1181,15 @@ class RealtimeDetector(app_manager.OSKenApp):
         Cài đặt DROP rule trên TẤT CẢ switches để chặn traffic từ attacker IP.
         Rule có hard_timeout → tự động gỡ sau self.block_timeout giây.
         """
+        attacker_ip = str(attacker_ip)
         if attacker_ip in self.blocked_ips:
+            return
+        if attacker_ip in PROTECTED_VICTIM_IPS:
+            return
+        if not may_install_drop(attacker_ip, attack_type):
+            self.logger.warning(
+                "[poll] refuse DROP src=%s attack=%s", attacker_ip, attack_type,
+            )
             return
 
         self.blocked_ips.add(attacker_ip)

@@ -62,6 +62,21 @@ def protect_dashboard():
             abort(403)
 
 
+@app.errorhandler(401)
+@app.errorhandler(403)
+def _api_http_error(err):
+    """POSTs from the SOC fetch JSON. Werkzeug's default 403 page is HTML
+    (`<!DOCTYPE...`) which becomes `SyntaxError: Unexpected token '<'` in JS."""
+    if request.path.startswith('/api/'):
+        code = getattr(err, 'code', 403) or 403
+        if code == 401:
+            msg = 'API token không hợp lệ.'
+        else:
+            msg = 'Phiên SOC hết hạn (CSRF). F5 http://127.0.0.1:5000 rồi bấm lại.'
+        return jsonify({'status': 'error', 'message': msg}), code
+    return err
+
+
 @app.after_request
 def harden_headers(resp):
     resp.headers['X-Content-Type-Options'] = 'nosniff'
@@ -378,10 +393,13 @@ def handle_simulation():
                     'message': 'Dừng traffic quá 20s — kiểm tra Mininet/mnexec.',
                 }), 500
             detail = (completed.stdout or completed.stderr or '').strip()
+            # Never echo HTML or a dash `<` token into the toast / Mininet paste.
+            if (not detail) or any(ch in detail for ch in '<>'):
+                detail = 'Đã gửi SIGKILL ping/iperf/hping3/nmap trong host Mininet.'
             return jsonify({
                 'status': 'ok' if completed.returncode == 0 else 'error',
                 'type': action_type,
-                'message': detail or 'Đã gửi SIGKILL ping/iperf/hping3/nmap trong host Mininet.',
+                'message': detail,
             })
         subprocess.Popen(cmd)
         return jsonify({

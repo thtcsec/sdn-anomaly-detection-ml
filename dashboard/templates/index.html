@@ -560,7 +560,11 @@
             if (type === 'warning') bg = 'bg-amber-950/90 border-amber-500 text-amber-300';
 
             toast.className = `p-3 rounded-xl border shadow-xl text-xs font-mono backdrop-blur-md transition-all transform duration-300 translate-y-2 opacity-0 flex items-center gap-2 ${bg}`;
-            toast.innerHTML = `<span>●</span> <span>${msg}</span>`;
+            const dot = document.createElement('span');
+            dot.textContent = '●';
+            const text = document.createElement('span');
+            text.textContent = String(msg);
+            toast.append(dot, text);
             
             container.appendChild(toast);
             setTimeout(() => {
@@ -593,14 +597,24 @@
                     headers: postHeaders,
                     body: JSON.stringify({ type: type, duration: duration, target: '10.0.0.1' })
                 });
-                const data = await res.json();
+                const raw = await res.text();
+                let data;
+                try {
+                    data = JSON.parse(raw);
+                } catch (parseErr) {
+                    showToast(
+                        'SOC không trả JSON (thường là HTML 403/500). F5 trang rồi bấm lại; restart python dashboard/app.py nếu vẫn lỗi.',
+                        'danger'
+                    );
+                    return;
+                }
                 if (res.ok && data.status === 'ok') {
                     showToast(data.message, 'success');
                 } else {
                     showToast(data.message || 'Không bắn được traffic', 'danger');
                 }
             } catch (err) {
-                showToast(`Lỗi kết nối: ${err}`, 'danger');
+                showToast(`Không gọi được /api/simulate: ${err}`, 'danger');
             }
         }
 

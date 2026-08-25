@@ -33,6 +33,53 @@ def test_trigger_ddos_default_h4_syn_only_duration_25(monkeypatch):
     assert "--udp" not in argv
 
 
+def test_stop_all_traffic_posix_killall_no_shell_metacharacters(monkeypatch):
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(list(argv))
+
+        class Result:
+            returncode = 0
+            stdout = b""
+            stderr = b""
+
+        return Result()
+
+    monkeypatch.setattr(tt.subprocess, "run", fake_run)
+    monkeypatch.setattr(tt, "get_mininet_host_pids", lambda: {"h1": "101", "h4": "104"})
+
+    assert tt.stop_all_traffic() is True
+    assert calls
+    for argv in calls:
+        assert all(isinstance(arg, str) for arg in argv)
+        joined = " ".join(argv)
+        assert "<" not in joined
+        assert ">" not in joined
+        assert "<<" not in joined
+        assert "$(" not in joined
+        assert "<(" not in joined
+        assert argv[0] in {"killall", "mnexec"}
+        if argv[0] == "killall":
+            assert argv == ["killall", "-9", argv[2]]
+            assert argv[2] in tt.KILL_NAMES
+        else:
+            assert argv[:4] == ["mnexec", "-a", argv[2], "killall"]
+            assert argv[2].isdigit()
+            assert argv[4] == "-9"
+            assert argv[5] in tt.KILL_NAMES
+            assert len(argv) == 6
+
+
+def test_argv_safe_rejects_redirect_token():
+    try:
+        tt._argv_safe(["sh", "-c", "killall < /dev/null"])
+    except ValueError as exc:
+        assert "metacharacters" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
+
+
 def test_trigger_ddos_optional_h5_udp(monkeypatch):
     calls = []
     monkeypatch.setattr(tt, "get_mininet_host_pids", lambda: {"h4": "104", "h5": "105"})

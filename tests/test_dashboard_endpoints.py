@@ -48,10 +48,27 @@ def test_stats_shape_with_missing_telemetry(client):
 def test_index_demo_ddos_duration_h4_only_and_alert_wording(client):
     html = client.get("/").get_data(as_text=True)
     assert "triggerSimulate('ddos', 25)" in html
+    assert "triggerSimulate('stop', 0)" in html
     assert "Bắn DDoS (h4 SYN → h1)" in html
     assert "Anomaly Alerts" in html
     assert "mininet&gt;" in html
     assert "poll_pps" in html
+    assert "Lỗi kết nối:" not in html
+    assert "JSON.parse(raw)" in html
+
+
+def test_simulate_stop_returns_json_not_html(client, dashboard_module):
+    resp = client.post(
+        "/api/simulate",
+        json={"type": "stop", "duration": 0, "target": "10.0.0.1"},
+        headers={"X-CSRF-Token": dashboard_module.CSRF_TOKEN},
+    )
+    payload = resp.get_json()
+    assert payload is not None
+    assert payload.get("status") in {"ok", "error"}
+    assert "<" not in str(payload.get("message") or "")
+    assert b"<!DOCTYPE" not in resp.data
+    assert b"<html" not in resp.data.lower()
 
 
 def test_blocked_count_reads_live_stats(client, dashboard_module):

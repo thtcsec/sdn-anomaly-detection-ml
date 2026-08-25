@@ -113,6 +113,10 @@ class RegressionTests(unittest.TestCase):
         client = dashboard_app.app.test_client()
         response = client.post("/api/simulate", json={"type": "normal"})
         self.assertEqual(response.status_code, 403)
+        payload = response.get_json()
+        self.assertIsNotNone(payload)
+        self.assertEqual(payload["status"], "error")
+        self.assertNotIn("<", payload["message"])
 
     def test_dashboard_rejects_non_lab_target(self):
         client = dashboard_app.app.test_client()

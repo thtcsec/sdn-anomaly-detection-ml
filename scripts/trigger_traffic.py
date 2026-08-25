@@ -69,23 +69,28 @@ def trigger_normal(duration=10):
     
     return True
 
-def trigger_ddos(target_ip='10.0.0.1', duration=8):
+def trigger_ddos(target_ip='10.0.0.1', duration=25, include_h5_udp=False):
+    """Default thesis/video path: h4 SYN flood → h1 only (enough for 3×5s polls).
+
+    Optional ``include_h5_udp`` keeps the old dual-attacker UDP path off the
+    dashboard button.
+    """
     pids = get_mininet_host_pids()
     if not pids:
         print("[!] Không tìm thấy Mininet topology đang chạy.")
         return False
-    
-    h4_pid = pids.get('h4')
-    h5_pid = pids.get('h5')
 
-    print(f"[*] Bắt đầu sinh DDoS SYN/UDP Flood tới {target_ip} ({duration}s)...")
+    h4_pid = pids.get('h4')
+
+    print(f"[*] Bắt đầu sinh DDoS SYN flood h4 → {target_ip} ({duration}s)...")
     if h4_pid:
-        # SYN flood
         run_in_host(h4_pid, ["timeout", str(duration), "hping3", "-S", "--flood", "-V", "-p", "80", target_ip], bg=True)
-    if h5_pid:
-        # UDP flood
-        run_in_host(h5_pid, ["timeout", str(duration), "hping3", "--udp", "--flood", "-p", "53", target_ip], bg=True)
-    
+    if include_h5_udp:
+        h5_pid = pids.get('h5')
+        if h5_pid:
+            print(f"[*] Optional: UDP flood h5 → {target_ip} ({duration}s)...")
+            run_in_host(h5_pid, ["timeout", str(duration), "hping3", "--udp", "--flood", "-p", "53", target_ip], bg=True)
+
     return True
 
 def trigger_portscan(target_ip='10.0.0.1', duration=10):
@@ -130,15 +135,24 @@ def stop_all_traffic():
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Mininet Traffic Generator")
     parser.add_argument('--type', choices=['normal', 'ddos', 'portscan', 'stop'], default='normal')
-    parser.add_argument('--duration', type=lambda value: max(1, min(60, int(value))), default=8)
+    parser.add_argument('--duration', type=lambda value: max(1, min(60, int(value))), default=None)
     parser.add_argument('--target', type=validate_target, default='10.0.0.1')
+    parser.add_argument(
+        '--include-h5-udp',
+        action='store_true',
+        help='Optional second attacker: h5 UDP flood (default is h4 SYN → h1 only)',
+    )
     args = parser.parse_args()
+    if args.duration is None:
+        duration = 25 if args.type == 'ddos' else 10
+    else:
+        duration = args.duration
 
     if args.type == 'normal':
-        trigger_normal(args.duration)
+        trigger_normal(duration)
     elif args.type == 'ddos':
-        trigger_ddos(args.target, args.duration)
+        trigger_ddos(args.target, duration, include_h5_udp=args.include_h5_udp)
     elif args.type == 'portscan':
-        trigger_portscan(args.target, args.duration)
+        trigger_portscan(args.target, duration)
     elif args.type == 'stop':
         stop_all_traffic()

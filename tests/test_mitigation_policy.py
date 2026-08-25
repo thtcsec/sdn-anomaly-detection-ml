@@ -10,6 +10,7 @@ from mitigation_policy import (
 
 
 def test_priority_and_streak_constants():
+    """Thesis/demo mitigation: 3 consecutive polls, DROP priority 1000."""
     assert DEFAULT_ALERT_THRESHOLD == 3
     assert BLOCK_FLOW_PRIORITY == 1000
 

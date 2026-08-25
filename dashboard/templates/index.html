@@ -153,9 +153,9 @@
                 </button>
 
                 <!-- DDoS traffic button -->
-                <button onclick="triggerSimulate('ddos', 8)" class="px-3 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/40 text-xs font-semibold flex items-center gap-1.5 transition-all active:scale-95">
+                <button onclick="triggerSimulate('ddos', 25)" class="px-3 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/40 text-xs font-semibold flex items-center gap-1.5 transition-all active:scale-95">
                     <span class="w-2 h-2 rounded-full bg-rose-500 animate-pulse"></span>
-                    <span>🔴 Bắn DDoS (h4 Flood)</span>
+                    <span>🔴 Bắn DDoS (h4 SYN → h1)</span>
                 </button>
 
                 <!-- Portscan traffic button -->
@@ -204,10 +204,10 @@
                 <div class="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-cyan-500 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
             </div>
 
-            <!-- Card 2: Attacks Detected -->
+            <!-- Card 2: ANOMALY ALERTS = len(alerts) capped at MAX_ALERTS=500; not 500 attacks. -->
             <div class="glass-card rounded-xl p-5 relative overflow-hidden group hover:border-rose-500/50 transition-all duration-300 glow-red">
                 <div class="flex items-center justify-between">
-                    <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Attacks Detected</span>
+                    <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Anomaly Alerts</span>
                     <div class="w-8 h-8 rounded-lg bg-rose-500/10 text-rose-400 flex items-center justify-center">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
                     </div>

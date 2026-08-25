@@ -64,12 +64,12 @@ from mitigation_policy import (  # noqa: E402
     MAX_ML_FLOWS_PER_POLL,
     PROTECTED_VICTIM_IPS,
     aggregate_ip_stats,
-    drop_attack_type,
+    decide_mitigation_cycle,
+    first_sighting_packet_delta,
     may_install_drop,
-    select_hold_ips,
     select_ml_flows,
     select_streak_ips,
-    update_consecutive_poll_streaks,
+    should_send_flow_stats_request,
 )
 
 from os_ken.base import app_manager
@@ -576,16 +576,17 @@ class RealtimeDetector(app_manager.OSKenApp):
             hub.sleep(float(self.monitor_interval))
             return
         interval = float(self.monitor_interval)
-        if self._inflight_xids:
+        if not should_send_flow_stats_request(self._inflight_xids):
             wait_end = time.time() + min(POLL_DUMP_GRACE_SEC, interval * 2.0)
             while time.time() < wait_end and self._inflight_xids:
                 hub.sleep(0.2)
-            if self._inflight_xids:
+            if not should_send_flow_stats_request(self._inflight_xids):
                 self.logger.info(
-                    "[poll] drop stale in-flight dump xids=%s before next request",
+                    "[poll] skip FlowStatsRequest; dump still in-flight xids=%s",
                     sorted(self._inflight_xids),
                 )
-                self._inflight_xids.clear()
+                hub.sleep(interval)
+                return
         self._start_new_poll()
         for _dp_id, dp in list(self.datapaths.items()):
             self._request_stats(dp)
@@ -809,9 +810,12 @@ class RealtimeDetector(app_manager.OSKenApp):
             )
             prev_pkts = self._prev_packets.get(flow_key)
             cur_pkts = int(stat.packet_count)
-            # First sighting of a 5-tuple (SYN-flood micro-flows): count packets now, not 0.
+            # Young SYN 5-tuples: count packets now. Leftover table duration
+            # already past this poll window must not look like a flood.
             if prev_pkts is None:
-                delta_pkts = cur_pkts
+                delta_pkts = first_sighting_packet_delta(
+                    cur_pkts, stat.duration_sec, self.monitor_interval,
+                )
             else:
                 delta_pkts = max(0, cur_pkts - prev_pkts)
             self._prev_packets[flow_key] = cur_pkts
@@ -1004,40 +1008,27 @@ class RealtimeDetector(app_manager.OSKenApp):
             return
 
         labels_by_ip = obs.get('labels_by_ip') or {}
-        normal_ips = {
-            str(ip)
-            for ip, labs in labels_by_ip.items()
-            if labs and not ({str(x) for x in labs} & ALERT_LABELS)
-        }
-        flood_ips = select_streak_ips(
-            obs['anomalous_ips'],
-            obs.get('delta_packets') or {},
-            skipped_ml_ips=obs.get('skipped_ml_ips'),
-            flow_count_by_ip=obs.get('flow_count') or {},
-            normal_ips=normal_ips,
-        )
-        hold_ips = select_hold_ips(
-            obs['observed_ips'],
-            flood_ips,
+        decision = decide_mitigation_cycle(
+            anomalous_ips=obs['anomalous_ips'],
+            observed_ips=obs['observed_ips'],
+            labels_by_ip=labels_by_ip,
             delta_packets_by_ip=obs.get('delta_packets') or {},
             flow_count_by_ip=obs.get('flow_count') or {},
             skipped_ml_ips=obs.get('skipped_ml_ips'),
             incomplete=bool(obs.get('incomplete')),
-            poll_delta_packets=int(obs.get('poll_delta_packets') or self._poll_delta_packets or 0),
-            tracked_streak_ips=self.alert_counter,
+            poll_delta_packets=int(
+                obs.get('poll_delta_packets') or self._poll_delta_packets or 0
+            ),
+            streaks=self.alert_counter,
+            blocked_ips=self.blocked_ips,
             last_anomaly_flood_ips=self._last_flood_sources,
+            last_alert_label=self._last_alert_label,
+            alert_threshold=self.alert_threshold,
+            mitigation_enabled=self.mitigation_enabled,
         )
-        incremented = update_consecutive_poll_streaks(
-            self.alert_counter,
-            flood_ips,
-            obs['observed_ips'],
-            self.blocked_ips,
-            hold_ips=hold_ips,
-        )
-        for ip_src in flood_ips:
-            labs = {str(x) for x in (labels_by_ip.get(ip_src) or ())}
-            alerts = labs & ALERT_LABELS
-            self._last_alert_label[ip_src] = '/'.join(sorted(alerts)) if alerts else 'ANOMALY'
+        flood_ips = decision['flood_ips']
+        hold_ips = decision['hold_ips']
+        self._last_flood_sources = decision['last_anomaly_flood_ips']
         for ip_src in sorted(flood_ips):
             self.logger.info(
                 "[POLL] src=%s | ANOMALY | streak=%d/%d",
@@ -1057,37 +1048,10 @@ class RealtimeDetector(app_manager.OSKenApp):
                 streak_now,
                 self.alert_threshold,
             )
-        for ip_src in incremented:
-            if not (
-                self.mitigation_enabled
-                and int(self.alert_counter.get(ip_src, 0) or 0) >= self.alert_threshold
-            ):
-                continue
-            is_hold = ip_src in hold_ips and ip_src not in flood_ips
-            if ip_src not in flood_ips and not is_hold:
-                continue
-            attack_type = drop_attack_type(
-                labels_by_ip.get(ip_src),
-                self._last_alert_label.get(ip_src),
-                is_hold=is_hold,
-            )
-            if not may_install_drop(ip_src, attack_type):
-                self.logger.warning(
-                    "[poll] refuse DROP src=%s attack=%s", ip_src, attack_type,
-                )
-                continue
+        for ip_src, attack_type in decision['drops']:
             datapath = next(iter(self.datapaths.values()), None)
             if datapath is not None:
                 self._block_attacker(datapath, ip_src, attack_type)
-        live = {
-            ip for ip, n in self.alert_counter.items() if int(n or 0) > 0
-        } - set(self.blocked_ips)
-        self._last_flood_sources = (
-            set(flood_ips) | set(hold_ips) | set(self._last_flood_sources)
-        ) & live
-        for ip in list(self._last_alert_label):
-            if ip not in live and ip not in self.blocked_ips:
-                self._last_alert_label.pop(ip, None)
         if self._poll_observations is obs:
             self._poll_observations = None
             self._poll_pending_flows = []

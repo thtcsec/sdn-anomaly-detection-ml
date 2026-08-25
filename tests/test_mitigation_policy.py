@@ -7,13 +7,17 @@ from mitigation_policy import (
     BLOCK_FLOW_PRIORITY,
     DEFAULT_ALERT_THRESHOLD,
     MIN_FLOOD_DELTA_PACKETS,
+    MIN_STALE_MICROFLOW_COUNT,
     PROTECTED_VICTIM_IPS,
     aggregate_ip_stats,
+    decide_mitigation_cycle,
     drop_attack_type,
+    first_sighting_packet_delta,
     is_flood_source,
     may_install_drop,
     select_hold_ips,
     select_streak_ips,
+    should_send_flow_stats_request,
     update_consecutive_poll_streaks,
 )
 
@@ -141,7 +145,7 @@ def test_microflow_count_is_src_volume_when_delta_lost():
         {"10.0.0.4": 0},
         skipped_ml_ips={"10.0.0.4"},
         flow_count_by_ip={"10.0.0.4": 61160},
-    ) == {"10.0.0.4"}
+    ) == set()
 
 
 def test_incomplete_poll_increments_ongoing_streak():
@@ -402,3 +406,199 @@ def test_skipped_ml_normal_idle_does_not_streak():
         normal_ips={"10.0.0.4", "10.0.0.5"},
     )
     assert chosen == set()
+
+
+def test_unlabeled_skip_without_this_poll_packets_does_not_start():
+    """Leftover 60k 5-tuples + ML skip + delta=0 must not open 0→1."""
+    assert MIN_STALE_MICROFLOW_COUNT == 256
+    chosen = select_streak_ips(
+        set(),
+        {"10.0.0.4": 0, "10.0.0.5": 0, "10.0.0.6": 0},
+        skipped_ml_ips={"10.0.0.4", "10.0.0.5", "10.0.0.6"},
+        flow_count_by_ip={"10.0.0.4": 80, "10.0.0.5": 80, "10.0.0.6": 80},
+    )
+    assert chosen == set()
+    chosen = select_streak_ips(
+        set(),
+        {"10.0.0.4": 400},
+        skipped_ml_ips={"10.0.0.4"},
+        flow_count_by_ip={"10.0.0.4": 400},
+    )
+    assert chosen == {"10.0.0.4"}
+
+
+def test_first_sighting_ignores_old_leftover_duration():
+    assert first_sighting_packet_delta(1, duration_sec=0) == 1
+    assert first_sighting_packet_delta(80, duration_sec=2, poll_interval=5.0) == 80
+    assert first_sighting_packet_delta(80, duration_sec=20, poll_interval=5.0) == 0
+    assert first_sighting_packet_delta(1, duration_sec=60, poll_interval=5.0) == 0
+
+
+def test_skip_overlapping_flow_stats_request():
+    assert should_send_flow_stats_request(set()) is True
+    assert should_send_flow_stats_request({1, 2}) is False
+    assert should_send_flow_stats_request(None) is True
+
+
+def _run_cycle(**kwargs):
+    defaults = dict(
+        skipped_ml_ips=set(),
+        incomplete=False,
+        blocked_ips=set(),
+        last_anomaly_flood_ips=set(),
+        last_alert_label={},
+        alert_threshold=DEFAULT_ALERT_THRESHOLD,
+        mitigation_enabled=True,
+    )
+    defaults.update(kwargs)
+    return decide_mitigation_cycle(**defaults)
+
+
+def test_idle_three_polls_never_hold_or_drop():
+    """Idle leftover NORMAL on .4/.5/.6: blocked empty, no HOLD+, no DROP."""
+    streaks = {}
+    last_flood = set()
+    last_label = {}
+    observed = {"10.0.0.4", "10.0.0.5", "10.0.0.6", "10.0.0.1"}
+    labels = {ip: {"NORMAL"} for ip in observed}
+    deltas = {ip: 0 for ip in observed}
+    counts = {"10.0.0.4": 80, "10.0.0.5": 80, "10.0.0.6": 80, "10.0.0.1": 40}
+    for _ in range(DEFAULT_ALERT_THRESHOLD):
+        d = _run_cycle(
+            anomalous_ips=set(),
+            observed_ips=observed,
+            labels_by_ip=labels,
+            delta_packets_by_ip=deltas,
+            flow_count_by_ip=counts,
+            skipped_ml_ips={"10.0.0.4", "10.0.0.5", "10.0.0.6"},
+            poll_delta_packets=0,
+            streaks=streaks,
+            last_anomaly_flood_ips=last_flood,
+            last_alert_label=last_label,
+        )
+        last_flood = d["last_anomaly_flood_ips"]
+        assert d["hold_ips"] == set()
+        assert d["flood_ips"] == set()
+        assert d["drops"] == []
+    assert all(int(streaks.get(ip, 0) or 0) == 0 for ip in observed)
+
+
+def test_h4_anomaly_three_polls_drops_only_h4():
+    """Attack h4: 1/3 → 2/3 → 3/3 DROP only 10.0.0.4 with ANOMALY."""
+    streaks = {}
+    last_flood = set()
+    last_label = {}
+    observed = {"10.0.0.1", "10.0.0.4", "10.0.0.5", "10.0.0.6"}
+    labels = {
+        "10.0.0.4": {"ANOMALY"},
+        "10.0.0.1": {"NORMAL"},
+        "10.0.0.5": {"NORMAL"},
+        "10.0.0.6": {"NORMAL"},
+    }
+    deltas = {"10.0.0.4": 400, "10.0.0.1": 8, "10.0.0.5": 4, "10.0.0.6": 3}
+    counts = {"10.0.0.4": 400, "10.0.0.1": 2, "10.0.0.5": 2, "10.0.0.6": 1}
+    drops = []
+    for step in range(DEFAULT_ALERT_THRESHOLD):
+        d = _run_cycle(
+            anomalous_ips={"10.0.0.4"},
+            observed_ips=observed,
+            labels_by_ip=labels,
+            delta_packets_by_ip=deltas,
+            flow_count_by_ip=counts,
+            poll_delta_packets=415,
+            streaks=streaks,
+            last_anomaly_flood_ips=last_flood,
+            last_alert_label=last_label,
+        )
+        last_flood = d["last_anomaly_flood_ips"]
+        assert d["hold_ips"] == set()
+        assert streaks["10.0.0.4"] == step + 1
+        assert streaks.get("10.0.0.5", 0) == 0
+        assert streaks.get("10.0.0.6", 0) == 0
+        drops.extend(d["drops"])
+    assert drops == [("10.0.0.4", "ANOMALY")]
+    assert all(ip == "10.0.0.4" for ip, _ in drops)
+    assert all(label != "NORMAL" for _, label in drops)
+
+
+def test_hold_after_anomaly_reaches_drop_not_normal():
+    """ANOMALY 1/3 then two stale HOLD+ polls → DROP ANOMALY, never Attack:NORMAL."""
+    streaks = {}
+    last_flood = set()
+    last_label = {}
+    d1 = _run_cycle(
+        anomalous_ips={"10.0.0.4"},
+        observed_ips={"10.0.0.4", "10.0.0.5"},
+        labels_by_ip={"10.0.0.4": {"ANOMALY"}, "10.0.0.5": {"NORMAL"}},
+        delta_packets_by_ip={"10.0.0.4": 400, "10.0.0.5": 2},
+        flow_count_by_ip={"10.0.0.4": 400, "10.0.0.5": 2},
+        poll_delta_packets=402,
+        streaks=streaks,
+        last_anomaly_flood_ips=last_flood,
+        last_alert_label=last_label,
+    )
+    last_flood = d1["last_anomaly_flood_ips"]
+    assert streaks["10.0.0.4"] == 1
+    assert d1["drops"] == []
+    for _ in range(2):
+        d = _run_cycle(
+            anomalous_ips=set(),
+            observed_ips={"10.0.0.4", "10.0.0.5"},
+            labels_by_ip={"10.0.0.4": {"NORMAL"}, "10.0.0.5": {"NORMAL"}},
+            delta_packets_by_ip={"10.0.0.4": 0, "10.0.0.5": 2},
+            flow_count_by_ip={"10.0.0.4": 400, "10.0.0.5": 2},
+            skipped_ml_ips={"10.0.0.4"},
+            poll_delta_packets=0,
+            streaks=streaks,
+            last_anomaly_flood_ips=last_flood,
+            last_alert_label=last_label,
+        )
+        last_flood = d["last_anomaly_flood_ips"]
+        assert "10.0.0.4" in d["hold_ips"]
+        assert "10.0.0.5" not in d["hold_ips"]
+        last_d = d
+    assert streaks["10.0.0.4"] == DEFAULT_ALERT_THRESHOLD
+    assert last_d["drops"] == [("10.0.0.4", "ANOMALY")]
+    assert last_d["drops"][0][1] != "NORMAL"
+
+
+def test_decide_never_drops_victims_or_normal_label():
+    streaks = {"10.0.0.1": 2, "10.0.0.4": 2}
+    last_label = {"10.0.0.1": "ANOMALY", "10.0.0.4": "NORMAL"}
+    d = _run_cycle(
+        anomalous_ips={"10.0.0.1", "10.0.0.4"},
+        observed_ips={"10.0.0.1", "10.0.0.4"},
+        labels_by_ip={"10.0.0.1": {"ANOMALY"}, "10.0.0.4": {"NORMAL"}},
+        delta_packets_by_ip={"10.0.0.1": 5000, "10.0.0.4": 5000},
+        flow_count_by_ip={"10.0.0.1": 500, "10.0.0.4": 500},
+        poll_delta_packets=10000,
+        streaks=streaks,
+        last_anomaly_flood_ips={"10.0.0.1", "10.0.0.4"},
+        last_alert_label=last_label,
+    )
+    drop_ips = {ip for ip, _ in d["drops"]}
+    assert "10.0.0.1" not in drop_ips
+    assert "10.0.0.2" not in drop_ips
+    assert "10.0.0.3" not in drop_ips
+    for _ip, label in d["drops"]:
+        assert "NORMAL" not in label
+        assert may_install_drop(_ip, label)
+
+
+def test_true_miss_resets_then_no_hold():
+    streaks = {"10.0.0.4": 2}
+    last_label = {"10.0.0.4": "ANOMALY"}
+    d = _run_cycle(
+        anomalous_ips=set(),
+        observed_ips={"10.0.0.1", "10.0.0.5"},
+        labels_by_ip={"10.0.0.1": {"NORMAL"}, "10.0.0.5": {"NORMAL"}},
+        delta_packets_by_ip={"10.0.0.1": 4, "10.0.0.5": 2},
+        flow_count_by_ip={"10.0.0.1": 1, "10.0.0.5": 1},
+        poll_delta_packets=6,
+        streaks=streaks,
+        last_anomaly_flood_ips={"10.0.0.4"},
+        last_alert_label=last_label,
+    )
+    assert "10.0.0.4" not in d["hold_ips"]
+    assert streaks["10.0.0.4"] == 0
+    assert d["drops"] == []

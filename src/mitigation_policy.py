@@ -21,6 +21,11 @@ MIN_FLOOD_DELTA_PACKETS = 30
 # during SYN-flood (tens of thousands of microflows). Sampling is a realtime
 # budget, not a change to offline LOSO.
 MAX_ML_FLOWS_PER_POLL = 256
+# Overlapping SYN dumps report packet_delta=0 while the table still holds
+# thousands of 5-tuples. Modest leftover ARP/ICMP tables (tens of flows) must
+# not count as that. Must stay >= MAX_ML_FLOWS_PER_POLL so idle leftovers
+# below the ML cap cannot start a streak via flow-count alone.
+MIN_STALE_MICROFLOW_COUNT = MAX_ML_FLOWS_PER_POLL
 
 
 def is_flood_source(ip_src, delta_packets, protected=None, min_delta=None):
@@ -30,6 +35,26 @@ def is_flood_source(ip_src, delta_packets, protected=None, min_delta=None):
     if str(ip_src) in protected:
         return False
     return int(delta_packets or 0) >= int(min_delta)
+
+
+def first_sighting_packet_delta(packet_count, duration_sec, poll_interval=5.0):
+    """Lifetime packet_count is this-cycle delta only for young 5-tuples.
+
+    New SYN microflows live inside one poll window. Leftover installs from
+    before this controller (duration already > poll_interval) must not look
+    like a flood on the first dump after restart.
+    """
+    pkts = int(packet_count or 0)
+    if pkts <= 0:
+        return 0
+    if float(duration_sec or 0) > float(poll_interval) + 1.0:
+        return 0
+    return pkts
+
+
+def should_send_flow_stats_request(inflight_xids):
+    """False while a dump is still in flight — never overlap OFPFlowStatsRequest."""
+    return not bool(inflight_xids)
 
 
 def aggregate_ip_stats(flows):
@@ -59,13 +84,15 @@ def select_streak_ips(
     Volume is per source IP across the whole dump: many 1-packet SYN microflows
     still count when their summed packet_delta is flood-sized (≥30), even if
     every individual 5-tuple is below that. A src also qualifies if some of
-    its flows were skipped by the per-poll ML cap and the aggregate is already
-    flood-sized — but never if this poll already classified that src NORMAL.
+    its flows were skipped by the per-poll ML cap *and this poll still saw
+    flood-sized packet_delta* — leftover 5-tuple count alone is not a start.
+    Never if this poll already classified that src NORMAL.
     """
     deltas = delta_packets_by_ip or {}
     counts = flow_count_by_ip or {}
     anomalous = {str(ip) for ip in (anomalous_ips or ())}
     normal = {str(ip) for ip in (normal_ips or ())}
+    min_delta = MIN_FLOOD_DELTA_PACKETS if min_delta is None else min_delta
     chosen = {
         ip
         for ip in anomalous
@@ -78,21 +105,34 @@ def select_streak_ips(
     }
     for ip in skipped_ml_ips or ():
         ip = str(ip)
+        if ip in chosen:
+            continue
         if ip in normal and ip not in anomalous:
             continue
-        if is_flood_source(ip, _src_flood_volume(ip, deltas, counts), protected, min_delta):
+        # Unlabeled ML-cap skip: this-poll packets only. A leftover SYN table
+        # with packet_delta=0 must not open 0→1; HOLD+ continues an old streak.
+        this_poll = int(deltas.get(ip, 0) or 0)
+        if this_poll < int(min_delta):
+            continue
+        if is_flood_source(ip, this_poll, protected, min_delta):
             chosen.add(ip)
     return chosen
 
 
 def _src_flood_volume(ip, deltas, counts):
-    """Per-IP flood size: summed packet_delta, or microflow count if deltas were 0.
+    """Per-IP flood size: this-poll packet_delta, else a huge stale SYN table.
 
     hping random-sport SYNs are 1-packet 5-tuples. Overlapping dumps often report
-    packet_delta=0 for those rows even while the table still holds tens of
-    thousands of flows from that src — count them as volume, not as a miss.
+    packet_delta=0 while the table still holds tens of thousands of flows —
+    count those as volume. Modest leftover ARP/ICMP tables must not qualify.
     """
-    return max(int(deltas.get(ip, 0) or 0), int(counts.get(ip, 0) or 0))
+    n_delta = int(deltas.get(ip, 0) or 0)
+    n_flows = int(counts.get(ip, 0) or 0)
+    if n_delta >= MIN_FLOOD_DELTA_PACKETS:
+        return n_delta
+    if n_flows >= MIN_STALE_MICROFLOW_COUNT:
+        return n_flows
+    return n_delta
 
 
 def _positive_streak_ips(tracked_streak_ips):
@@ -154,8 +194,8 @@ def select_hold_ips(
             continue
         stale = (
             ip in skipped
-            or (n_flows >= MIN_FLOOD_DELTA_PACKETS and n_delta < MIN_FLOOD_DELTA_PACKETS)
-            or (pps_dead and n_flows >= MIN_FLOOD_DELTA_PACKETS)
+            or (n_flows >= MIN_STALE_MICROFLOW_COUNT and n_delta < MIN_FLOOD_DELTA_PACKETS)
+            or (pps_dead and n_flows >= MIN_STALE_MICROFLOW_COUNT)
         )
         if stale and (ip in observed or ip in skipped):
             hold.add(ip)
@@ -249,3 +289,98 @@ def update_consecutive_poll_streaks(
         else:
             streaks[ip_src] = 0
     return incremented
+
+
+def decide_mitigation_cycle(
+    *,
+    anomalous_ips,
+    observed_ips,
+    labels_by_ip,
+    delta_packets_by_ip,
+    flow_count_by_ip,
+    skipped_ml_ips,
+    incomplete,
+    poll_delta_packets,
+    streaks,
+    blocked_ips,
+    last_anomaly_flood_ips,
+    last_alert_label,
+    alert_threshold=DEFAULT_ALERT_THRESHOLD,
+    mitigation_enabled=True,
+):
+    """One completed-poll decision: flood / HOLD+ / reset / DROP candidates.
+
+    Mutates ``streaks`` and ``last_alert_label``. Does not install OpenFlow.
+    DROP candidates never include victims or NORMAL-only labels.
+    """
+    labels_by_ip = labels_by_ip or {}
+    last_alert_label = last_alert_label if last_alert_label is not None else {}
+    last_flood = set(last_anomaly_flood_ips or ())
+    blocked = set(blocked_ips or ())
+    normal_ips = {
+        str(ip)
+        for ip, labs in labels_by_ip.items()
+        if labs and not ({str(x) for x in labs} & DROP_ALERT_LABELS)
+    }
+    flood_ips = select_streak_ips(
+        anomalous_ips,
+        delta_packets_by_ip,
+        skipped_ml_ips=skipped_ml_ips,
+        flow_count_by_ip=flow_count_by_ip,
+        normal_ips=normal_ips,
+    )
+    hold_ips = select_hold_ips(
+        observed_ips,
+        flood_ips,
+        delta_packets_by_ip=delta_packets_by_ip,
+        flow_count_by_ip=flow_count_by_ip,
+        skipped_ml_ips=skipped_ml_ips,
+        incomplete=incomplete,
+        poll_delta_packets=poll_delta_packets,
+        tracked_streak_ips=streaks,
+        last_anomaly_flood_ips=last_flood,
+    )
+    incremented = update_consecutive_poll_streaks(
+        streaks,
+        flood_ips,
+        observed_ips,
+        blocked,
+        hold_ips=hold_ips,
+    )
+    for ip_src in flood_ips:
+        labs = {str(x) for x in (labels_by_ip.get(ip_src) or ())}
+        alerts = labs & DROP_ALERT_LABELS
+        if alerts:
+            last_alert_label[ip_src] = "/".join(sorted(alerts))
+        elif ip_src not in last_alert_label:
+            last_alert_label[ip_src] = "ANOMALY"
+    drops = []
+    if mitigation_enabled:
+        for ip_src in incremented:
+            if int(streaks.get(ip_src, 0) or 0) < int(alert_threshold):
+                continue
+            is_hold = ip_src in hold_ips and ip_src not in flood_ips
+            if ip_src not in flood_ips and not is_hold:
+                continue
+            attack_type = drop_attack_type(
+                labels_by_ip.get(ip_src),
+                last_alert_label.get(ip_src),
+                is_hold=is_hold,
+            )
+            if may_install_drop(ip_src, attack_type):
+                drops.append((str(ip_src), attack_type))
+    live = {
+        ip for ip, n in streaks.items() if int(n or 0) > 0
+    } - blocked
+    new_last_flood = (set(flood_ips) | set(hold_ips) | last_flood) & live
+    for ip in list(last_alert_label):
+        if ip not in live and ip not in blocked:
+            last_alert_label.pop(ip, None)
+    return {
+        "flood_ips": flood_ips,
+        "hold_ips": hold_ips,
+        "incremented": incremented,
+        "drops": drops,
+        "last_anomaly_flood_ips": new_last_flood,
+        "last_alert_label": last_alert_label,
+    }
